@@ -2,7 +2,7 @@
 // shared.ts — Shared utilities for capture-plan and capture-done hooks
 
 import { appendFileSync, mkdirSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 
 // ---- Types ----
@@ -18,10 +18,11 @@ export interface SessionState {
   plan_slug: string;
   plan_title: string;
   plan_dir: string;
-  counter: number;
   date_key: string;
   timestamp: string;
   journal_path?: string;
+  project?: string;
+  tags?: string;
 }
 
 export interface PlanFrontmatter {
@@ -32,6 +33,7 @@ export interface PlanFrontmatter {
   tags?: string[];
   counter?: number;
   session?: string;
+  project?: string;
 }
 
 // ---- Paths ----
@@ -253,6 +255,23 @@ export async function summarizeWithClaude(
   return { summary, tags };
 }
 
+// ---- Project & Session Helpers ----
+
+export function getProjectName(cwd?: string): string {
+  if (!cwd) return "";
+  return basename(cwd);
+}
+
+export function shortSessionId(id: string): string {
+  return id.slice(0, 8);
+}
+
+export function formatTagsYaml(tagsCsv: string): string {
+  const tags = tagsCsv.split(",").map((t) => t.trim()).filter(Boolean);
+  if (tags.length === 0) return "";
+  return tags.map((t) => `  - ${t}`).join("\n");
+}
+
 // ---- Tags ----
 
 export function mergeTags(existing: string[], newTagsCsv: string): string {
@@ -453,6 +472,10 @@ export function parsePlanFrontmatter(content: string): PlanFrontmatter {
   // session
   const sessionMatch = fm.match(/^session:\s*(.+)/m);
   if (sessionMatch) result.session = sessionMatch[1].trim();
+
+  // project
+  const projectMatch = fm.match(/^project:\s*(.+)/m);
+  if (projectMatch) result.project = projectMatch[1].trim();
 
   // tags (YAML list format)
   const tagsSection = fm.match(/^tags:\n((?:\s+-\s+.+\n?)*)/m);

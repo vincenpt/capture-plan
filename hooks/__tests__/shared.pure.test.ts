@@ -9,6 +9,9 @@ import {
   parsePlanFrontmatter,
   getDatePartsFor,
   getJournalPathForDate,
+  getProjectName,
+  formatTagsYaml,
+  shortSessionId,
 } from "../shared.ts";
 
 // ---- extractTitle ----
@@ -244,7 +247,29 @@ describe("padCounter", () => {
 // ---- parsePlanFrontmatter ----
 
 describe("parsePlanFrontmatter", () => {
-  it("parses a full frontmatter block", () => {
+  it("parses new-format frontmatter (topical tags, project, session link)", () => {
+    const content = `---
+created: "[[Journal/2026/03-March/29-Sunday|2026-03-29T14:30]]"
+project: capture-plan
+tags:
+  - plugin-dev
+  - hooks
+session: "[[Sessions/3a76e3ac]]"
+---
+# My Plan
+
+Body text`;
+
+    const fm = parsePlanFrontmatter(content);
+    expect(fm.created).toBe("[[Journal/2026/03-March/29-Sunday|2026-03-29T14:30]]");
+    expect(fm.journalPath).toBe("Journal/2026/03-March/29-Sunday");
+    expect(fm.datetime).toBe("2026-03-29T14:30");
+    expect(fm.project).toBe("capture-plan");
+    expect(fm.tags).toEqual(["plugin-dev", "hooks"]);
+    expect(fm.session).toBe('"[[Sessions/3a76e3ac]]"');
+  });
+
+  it("parses legacy frontmatter (status, counter, source)", () => {
     const content = `---
 created: "[[Journal/2026/03-March/29-Sunday|2026-03-29T14:30]]"
 status: planned
@@ -261,8 +286,6 @@ Body text`;
 
     const fm = parsePlanFrontmatter(content);
     expect(fm.created).toBe("[[Journal/2026/03-March/29-Sunday|2026-03-29T14:30]]");
-    expect(fm.journalPath).toBe("Journal/2026/03-March/29-Sunday");
-    expect(fm.datetime).toBe("2026-03-29T14:30");
     expect(fm.status).toBe("planned");
     expect(fm.tags).toEqual(["plan", "claude-session"]);
     expect(fm.session).toBe("abc123");
@@ -311,6 +334,16 @@ created: [[Journal/2026/01-January/15-Wednesday|2026-01-15T09:00]]
     expect(fm.datetime).toBe("2026-01-15T09:00");
   });
 
+  it("parses project field", () => {
+    const content = `---
+project: my-app
+---
+# Plan`;
+
+    const fm = parsePlanFrontmatter(content);
+    expect(fm.project).toBe("my-app");
+  });
+
   it("handles empty content", () => {
     expect(parsePlanFrontmatter("")).toEqual({});
   });
@@ -321,6 +354,58 @@ status: planned
 # No closing delimiter`;
 
     expect(parsePlanFrontmatter(content)).toEqual({});
+  });
+});
+
+// ---- getProjectName ----
+
+describe("getProjectName", () => {
+  it("extracts basename from cwd", () => {
+    expect(getProjectName("/Users/k/src/github/kriswill/capture-plan")).toBe("capture-plan");
+  });
+
+  it("returns empty string for undefined", () => {
+    expect(getProjectName(undefined)).toBe("");
+  });
+
+  it("returns empty string for empty string", () => {
+    expect(getProjectName("")).toBe("");
+  });
+
+  it("handles root path", () => {
+    expect(getProjectName("/")).toBe("");
+  });
+});
+
+// ---- formatTagsYaml ----
+
+describe("formatTagsYaml", () => {
+  it("formats comma-separated tags as YAML list", () => {
+    expect(formatTagsYaml("plugin-dev, hooks")).toBe("  - plugin-dev\n  - hooks");
+  });
+
+  it("handles single tag", () => {
+    expect(formatTagsYaml("refactoring")).toBe("  - refactoring");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(formatTagsYaml("")).toBe("");
+  });
+
+  it("trims whitespace from tags", () => {
+    expect(formatTagsYaml("  foo ,  bar  ")).toBe("  - foo\n  - bar");
+  });
+});
+
+// ---- shortSessionId ----
+
+describe("shortSessionId", () => {
+  it("returns first 8 characters", () => {
+    expect(shortSessionId("3a76e3ac-3e0b-44c4-8962-b02716a8138b")).toBe("3a76e3ac");
+  });
+
+  it("returns full string if shorter than 8", () => {
+    expect(shortSessionId("abc")).toBe("abc");
   });
 });
 

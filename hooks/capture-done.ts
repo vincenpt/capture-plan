@@ -8,9 +8,12 @@ import {
   loadConfig,
   runObsidian,
   summarizeWithClaude,
+  mergeTags,
   mergeTagsOnDailyNote,
   getDateParts,
   getJournalPath,
+  getProjectName,
+  formatTagsYaml,
   appendToJournal,
   appendRowToJournalSection,
   getVaultPath,
@@ -124,17 +127,15 @@ async function main(): Promise<void> {
 
     const summaryPath = `${state.plan_dir}/summary`;
 
+    const project = state.project || getProjectName(payload.cwd);
+    const planTags = state.tags ? state.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+    const combinedTagsCsv = mergeTags(planTags, newTags);
+    const tagsYaml = formatTagsYaml(combinedTagsCsv);
+
     const noteContent = `---
-created: "[[${journalPath}|${datetime}]]"
-status: done
-tags:
-  - done-summary
-  - claude-session
-source: Claude Code (Execution)
-session: ${state.session_id}
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
 plan: "[[${state.plan_dir}/plan|${state.plan_title}]]"
 summary: "${summary.replace(/"/g, '\\"')}"
-counter: ${state.counter}
 ---
 # Done: ${state.plan_title}
 

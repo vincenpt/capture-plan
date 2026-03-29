@@ -19,6 +19,9 @@ import {
   nextCounter,
   padCounter,
   writeSessionState,
+  getProjectName,
+  formatTagsYaml,
+  shortSessionId,
   type SessionState,
 } from "./shared.ts";
 
@@ -111,15 +114,12 @@ async function main(): Promise<void> {
 
     const journalPath = getJournalPath(config);
 
+    const project = getProjectName(payload.cwd);
+    const tagsYaml = formatTagsYaml(newTags);
+
     const noteContent = `---
-created: "[[${journalPath}|${datetime}]]"
-status: planned
-tags:
-  - plan
-  - claude-session
-source: Claude Code (Plan Mode)
-session: ${sessionId}
-counter: ${counter}
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
+session: "[[Sessions/${shortSessionId(sessionId)}]]"
 ---
 # ${title}
 
@@ -146,10 +146,11 @@ ${stripTitleLine(planContent)}
       plan_slug: slug,
       plan_title: title,
       plan_dir: planDir,
-      counter,
       date_key: dateKey,
       timestamp: new Date().toISOString(),
       journal_path: journalPath,
+      project: getProjectName(payload.cwd),
+      tags: newTags,
     };
     await writeSessionState(sessionId, state);
 

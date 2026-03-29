@@ -99,10 +99,11 @@ describe("session state", () => {
     plan_slug: "my-plan",
     plan_title: "My Plan",
     plan_dir: "Claude/Plans/2026/03-29/001-my-plan",
-    counter: 1,
     date_key: "2026-03-29",
     timestamp: "2026-03-29T10:00:00.000Z",
     journal_path: "Journal/2026/03-March/29-Saturday",
+    project: "my-project",
+    tags: "plugin-dev, hooks",
   };
 
   it("writes and reads back the same state", async () => {
@@ -130,10 +131,11 @@ describe("session state", () => {
     expect(read!.plan_slug).toBe("my-plan");
     expect(read!.plan_title).toBe("My Plan");
     expect(read!.plan_dir).toBe("Claude/Plans/2026/03-29/001-my-plan");
-    expect(read!.counter).toBe(1);
     expect(read!.date_key).toBe("2026-03-29");
     expect(read!.timestamp).toBe("2026-03-29T10:00:00.000Z");
     expect(read!.journal_path).toBe("Journal/2026/03-March/29-Saturday");
+    expect(read!.project).toBe("my-project");
+    expect(read!.tags).toBe("plugin-dev, hooks");
   });
 
   it("handles state without optional journal_path", async () => {
