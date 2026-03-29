@@ -100,6 +100,26 @@ plan_path = "Claude/Plans"
 journal_path = "Journal"
 ```
 
+## Skills
+
+These slash commands are available inside Claude Code sessions when the plugin is installed.
+
+### `/backport-journal`
+
+Imports plans from `~/.claude/plans/` into the Obsidian vault, creating both plan notes and daily journal entries. Walks you through filtering (by date range, project, or specific plans), choosing between AI-generated or fast text summaries, previewing with a dry run, and confirming before import. Already-imported plans are skipped automatically.
+
+### `/release [major|minor|patch]`
+
+Bumps the version across all plugin files (`package.json`, `plugin.json`, `marketplace.json`), runs tests, commits, tags, pushes, and creates a GitHub release. Defaults to `patch` if no bump type is specified.
+
+### `/start-dev`
+
+Enables dev mode by symlinking the plugin cache to the local repo checkout. Hook changes take effect immediately without releasing a new version.
+
+### `/end-dev`
+
+Disables dev mode by removing the symlink and restoring the cached release copy.
+
 ## License
 
 MIT
