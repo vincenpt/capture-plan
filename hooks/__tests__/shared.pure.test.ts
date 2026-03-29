@@ -6,6 +6,9 @@ import {
   formatAmPm,
   mergeTags,
   padCounter,
+  parsePlanFrontmatter,
+  getDatePartsFor,
+  getJournalPathForDate,
 } from "../shared.ts";
 
 // ---- extractTitle ----
@@ -235,5 +238,152 @@ describe("padCounter", () => {
 
   it("pads zero", () => {
     expect(padCounter(0)).toBe("000");
+  });
+});
+
+// ---- parsePlanFrontmatter ----
+
+describe("parsePlanFrontmatter", () => {
+  it("parses a full frontmatter block", () => {
+    const content = `---
+created: "[[Journal/2026/03-March/29-Sunday|2026-03-29T14:30]]"
+status: planned
+tags:
+  - plan
+  - claude-session
+source: Claude Code (Plan Mode)
+session: abc123
+counter: 1
+---
+# My Plan
+
+Body text`;
+
+    const fm = parsePlanFrontmatter(content);
+    expect(fm.created).toBe("[[Journal/2026/03-March/29-Sunday|2026-03-29T14:30]]");
+    expect(fm.journalPath).toBe("Journal/2026/03-March/29-Sunday");
+    expect(fm.datetime).toBe("2026-03-29T14:30");
+    expect(fm.status).toBe("planned");
+    expect(fm.tags).toEqual(["plan", "claude-session"]);
+    expect(fm.session).toBe("abc123");
+    expect(fm.counter).toBe(1);
+  });
+
+  it("returns empty object when no frontmatter", () => {
+    const fm = parsePlanFrontmatter("# Just a heading\n\nSome text");
+    expect(fm).toEqual({});
+  });
+
+  it("handles frontmatter without created field", () => {
+    const content = `---
+status: planned
+counter: 5
+---
+# Plan`;
+
+    const fm = parsePlanFrontmatter(content);
+    expect(fm.created).toBeUndefined();
+    expect(fm.journalPath).toBeUndefined();
+    expect(fm.datetime).toBeUndefined();
+    expect(fm.status).toBe("planned");
+    expect(fm.counter).toBe(5);
+  });
+
+  it("handles frontmatter without tags", () => {
+    const content = `---
+status: done
+---
+# Plan`;
+
+    const fm = parsePlanFrontmatter(content);
+    expect(fm.tags).toBeUndefined();
+    expect(fm.status).toBe("done");
+  });
+
+  it("handles created field without quotes", () => {
+    const content = `---
+created: [[Journal/2026/01-January/15-Wednesday|2026-01-15T09:00]]
+---
+# Plan`;
+
+    const fm = parsePlanFrontmatter(content);
+    expect(fm.journalPath).toBe("Journal/2026/01-January/15-Wednesday");
+    expect(fm.datetime).toBe("2026-01-15T09:00");
+  });
+
+  it("handles empty content", () => {
+    expect(parsePlanFrontmatter("")).toEqual({});
+  });
+
+  it("handles malformed frontmatter (no closing ---)", () => {
+    const content = `---
+status: planned
+# No closing delimiter`;
+
+    expect(parsePlanFrontmatter(content)).toEqual({});
+  });
+});
+
+// ---- getDatePartsFor ----
+
+describe("getDatePartsFor", () => {
+  it("returns correct parts for a known date", () => {
+    // March 29, 2026 is a Sunday
+    const date = new Date(2026, 2, 29, 14, 30);
+    const parts = getDatePartsFor(date);
+    expect(parts.dd).toBe("29");
+    expect(parts.mm).toBe("03");
+    expect(parts.yyyy).toBe("2026");
+    expect(parts.monthName).toBe("March");
+    expect(parts.dayName).toBe("Sunday");
+    expect(parts.dateKey).toBe("2026-03-29");
+    expect(parts.datetime).toBe("2026-03-29T14:30");
+    expect(parts.timeStr).toBe("14:30");
+    expect(parts.ampmTime).toBe("2:30 PM");
+  });
+
+  it("pads single-digit day and month", () => {
+    const date = new Date(2026, 0, 5, 9, 3); // Jan 5
+    const parts = getDatePartsFor(date);
+    expect(parts.dd).toBe("05");
+    expect(parts.mm).toBe("01");
+    expect(parts.hh).toBe("09");
+    expect(parts.min).toBe("03");
+  });
+
+  it("handles midnight", () => {
+    const date = new Date(2026, 5, 15, 0, 0);
+    const parts = getDatePartsFor(date);
+    expect(parts.ampmTime).toBe("12:00 AM");
+  });
+});
+
+// ---- getJournalPathForDate ----
+
+describe("getJournalPathForDate", () => {
+  const config = { plan_path: "Claude/Plans", journal_path: "Journal" };
+
+  it("builds correct path for a known date", () => {
+    // March 29, 2026 is a Sunday
+    const date = new Date(2026, 2, 29, 14, 30);
+    expect(getJournalPathForDate(config, date)).toBe(
+      "Journal/2026/03-March/29-Sunday",
+    );
+  });
+
+  it("builds correct path for January 1", () => {
+    // Jan 1, 2026 is a Thursday
+    const date = new Date(2026, 0, 1, 12, 0);
+    expect(getJournalPathForDate(config, date)).toBe(
+      "Journal/2026/01-January/01-Thursday",
+    );
+  });
+
+  it("uses custom journal_path from config", () => {
+    const customConfig = { plan_path: "Claude/Plans", journal_path: "MyJournal" };
+    const date = new Date(2026, 2, 29, 14, 30);
+    expect(getJournalPathForDate(customConfig, date)).toBe(
+      "MyJournal/2026/03-March/29-Sunday",
+    );
   });
 });

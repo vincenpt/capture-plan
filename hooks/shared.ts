@@ -24,6 +24,16 @@ export interface SessionState {
   journal_path?: string;
 }
 
+export interface PlanFrontmatter {
+  created?: string;
+  journalPath?: string;
+  datetime?: string;
+  status?: string;
+  tags?: string[];
+  counter?: number;
+  session?: string;
+}
+
 // ---- Paths ----
 
 export const HOOKS_DIR = dirname(Bun.main);
@@ -158,32 +168,39 @@ export function formatAmPm(hours: number, minutes: number): string {
   return `${h}:${String(minutes).padStart(2, "0")} ${period}`;
 }
 
-export function getDateParts(): {
+export type DateParts = {
   dd: string;
   mm: string;
   yyyy: string;
   monthName: string;
+  dayName: string;
   dateKey: string;
   hh: string;
   min: string;
   datetime: string;
   timeStr: string;
   ampmTime: string;
-} {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2, "0");
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const yyyy = String(now.getFullYear());
-  const hh = String(now.getHours()).padStart(2, "0");
-  const min = String(now.getMinutes()).padStart(2, "0");
-  const monthName = new Intl.DateTimeFormat("en-US", { month: "long" }).format(now);
+};
+
+export function getDatePartsFor(date: Date): DateParts {
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(date.getFullYear());
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  const monthName = new Intl.DateTimeFormat("en-US", { month: "long" }).format(date);
+  const dayName = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date);
   return {
-    dd, mm, yyyy, monthName, hh, min,
+    dd, mm, yyyy, monthName, dayName, hh, min,
     dateKey: `${yyyy}-${mm}-${dd}`,
     datetime: `${yyyy}-${mm}-${dd}T${hh}:${min}`,
     timeStr: `${hh}:${min}`,
-    ampmTime: formatAmPm(now.getHours(), now.getMinutes()),
+    ampmTime: formatAmPm(date.getHours(), date.getMinutes()),
   };
+}
+
+export function getDateParts(): DateParts {
+  return getDatePartsFor(new Date());
 }
 
 // ---- Haiku Summarization ----
@@ -276,14 +293,13 @@ export function mergeTagsOnDailyNote(
 
 // ---- Daily Journal ----
 
-export function getJournalPath(config: Config): string {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2, "0");
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const yyyy = String(now.getFullYear());
-  const monthName = new Intl.DateTimeFormat("en-US", { month: "long" }).format(now);
-  const dayName = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(now);
+export function getJournalPathForDate(config: Config, date: Date): string {
+  const { dd, mm, yyyy, monthName, dayName } = getDatePartsFor(date);
   return `${config.journal_path}/${yyyy}/${mm}-${monthName}/${dd}-${dayName}`;
+}
+
+export function getJournalPath(config: Config): string {
+  return getJournalPathForDate(config, new Date());
 }
 
 export function appendToJournal(
@@ -408,6 +424,46 @@ export function deleteSessionState(sessionId: string): void {
     const path = join(STATE_DIR, "sessions", `${sessionId}.json`);
     Bun.spawnSync(["rm", "-f", path]);
   } catch { /* ignore */ }
+}
+
+// ---- Plan Frontmatter Parsing ----
+
+export function parsePlanFrontmatter(content: string): PlanFrontmatter {
+  const result: PlanFrontmatter = {};
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return result;
+  const fm = fmMatch[1];
+
+  // created: "[[Journal/path|datetime]]"
+  const createdMatch = fm.match(/^created:\s*"?\[\[([^|]+)\|([^\]]+)\]\]"?/m);
+  if (createdMatch) {
+    result.created = `[[${createdMatch[1]}|${createdMatch[2]}]]`;
+    result.journalPath = createdMatch[1];
+    result.datetime = createdMatch[2];
+  }
+
+  // status
+  const statusMatch = fm.match(/^status:\s*(.+)/m);
+  if (statusMatch) result.status = statusMatch[1].trim();
+
+  // counter
+  const counterMatch = fm.match(/^counter:\s*(\d+)/m);
+  if (counterMatch) result.counter = parseInt(counterMatch[1], 10);
+
+  // session
+  const sessionMatch = fm.match(/^session:\s*(.+)/m);
+  if (sessionMatch) result.session = sessionMatch[1].trim();
+
+  // tags (YAML list format)
+  const tagsSection = fm.match(/^tags:\n((?:\s+-\s+.+\n?)*)/m);
+  if (tagsSection) {
+    result.tags = tagsSection[1]
+      .split("\n")
+      .map((l) => l.replace(/^\s+-\s+/, "").trim())
+      .filter(Boolean);
+  }
+
+  return result;
 }
 
 // ---- Transcript ----
