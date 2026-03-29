@@ -1,5 +1,4 @@
 ---
-name: end-dev
 description: Disable dev mode for the capture-plan plugin. Removes the symlink and restores the cached release copy.
 ---
 

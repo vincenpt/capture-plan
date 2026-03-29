@@ -1,6 +1,5 @@
 ---
-name: release
-description: Use when the user wants to release a new version of the capture-plan plugin. Bumps version numbers, commits, tags, pushes, and creates a GitHub release.
+description: "Use when the user wants to release a new version of the capture-plan plugin. Bumps version numbers, commits, tags, pushes, and creates a GitHub release."
 ---
 
 # Release

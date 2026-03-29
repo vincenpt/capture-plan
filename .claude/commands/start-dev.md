@@ -1,5 +1,4 @@
 ---
-name: start-dev
 description: Enable dev mode for the capture-plan plugin. Symlinks the plugin cache to the local repo so edits take effect immediately without releasing.
 ---
 

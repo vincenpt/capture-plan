@@ -102,11 +102,15 @@ journal_path = "Journal"
 
 ## Skills
 
-These slash commands are available inside Claude Code sessions when the plugin is installed.
+These slash commands are available to all users when the plugin is installed.
 
 ### `/backport-journal`
 
 Imports plans from `~/.claude/plans/` into the Obsidian vault, creating both plan notes and daily journal entries. Walks you through filtering (by date range, project, or specific plans), choosing between AI-generated or fast text summaries, previewing with a dry run, and confirming before import. Already-imported plans are skipped automatically.
+
+## Developer Commands
+
+These commands are only available when working inside the capture-plan repository. They are not distributed to end users.
 
 ### `/release [major|minor|patch]`
 

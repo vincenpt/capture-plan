@@ -14,7 +14,7 @@ Import plans from `~/.claude/plans/` into the Obsidian vault, creating both the 
 Run the discovery script from the plugin root directory to list all plans:
 
 ```bash
-bun hooks/backport-journal.ts --list 2>/dev/null
+bun ${CLAUDE_PLUGIN_ROOT}/hooks/backport-journal.ts --list 2>/dev/null
 ```
 
 Parse the JSON output. Each entry has: `sourceSlug`, `title`, `date`, `ampmTime`, `projectLabel`, `isImported`.
@@ -64,16 +64,16 @@ Execute the script with `--dry-run` and the appropriate filters:
 
 ```bash
 # All new plans
-bun hooks/backport-journal.ts --all --dry-run [--skip-summarize] 2>/dev/null
+bun ${CLAUDE_PLUGIN_ROOT}/hooks/backport-journal.ts --all --dry-run [--skip-summarize] 2>/dev/null
 
 # Date range
-bun hooks/backport-journal.ts --all --from=YYYY-MM-DD --to=YYYY-MM-DD --dry-run [--skip-summarize] 2>/dev/null
+bun ${CLAUDE_PLUGIN_ROOT}/hooks/backport-journal.ts --all --from=YYYY-MM-DD --to=YYYY-MM-DD --dry-run [--skip-summarize] 2>/dev/null
 
 # By project
-bun hooks/backport-journal.ts --all --project=project-name --dry-run [--skip-summarize] 2>/dev/null
+bun ${CLAUDE_PLUGIN_ROOT}/hooks/backport-journal.ts --all --project=project-name --dry-run [--skip-summarize] 2>/dev/null
 
 # Specific plans
-bun hooks/backport-journal.ts --plans=slug1,slug2,slug3 --dry-run [--skip-summarize] 2>/dev/null
+bun ${CLAUDE_PLUGIN_ROOT}/hooks/backport-journal.ts --plans=slug1,slug2,slug3 --dry-run [--skip-summarize] 2>/dev/null
 ```
 
 Add `--skip-summarize` if the user chose fast text extraction.
@@ -94,7 +94,7 @@ Use `AskUserQuestion` to confirm:
 Run the same command without `--dry-run`:
 
 ```bash
-bun hooks/backport-journal.ts --all [--skip-summarize] 2>/dev/null
+bun ${CLAUDE_PLUGIN_ROOT}/hooks/backport-journal.ts --all [--skip-summarize] 2>/dev/null
 ```
 
 Parse the JSON result and display the final report: "Imported N plans. M skipped. E errors."
