@@ -1,0 +1,11 @@
+# capture-plan hook configuration
+
+# Obsidian vault name (run `obsidian vaults` to list available vaults)
+vault = "Personal"
+
+# Base path for plan notes inside the vault
+# Structure: <plan_path>/<yyyy>/<mm-dd>/<counter>-<slug>/{plan,summary}.md
+plan_path = "Claude/Plans"
+
+# Base path for journal entries inside the vault
+journal_path = "Journal"

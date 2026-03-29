@@ -1,0 +1,3 @@
+hooks/state/
+*.log
+node_modules/

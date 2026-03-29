@@ -1,0 +1,19 @@
+{
+  "name": "capture-plan",
+  "version": "1.0.0",
+  "description": "Captures Claude Code plans and execution summaries to an Obsidian vault with daily journal integration",
+  "author": {
+    "name": "kriswill",
+    "url": "https://github.com/kriswill"
+  },
+  "homepage": "https://github.com/kriswill/capture-plan#readme",
+  "repository": "https://github.com/kriswill/capture-plan",
+  "license": "MIT",
+  "keywords": [
+    "obsidian",
+    "plans",
+    "journal",
+    "capture",
+    "hooks"
+  ]
+}

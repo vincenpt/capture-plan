@@ -1,0 +1,29 @@
+{
+  "description": "Captures plans on ExitPlanMode and execution summaries on Stop",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/capture-plan.ts",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun run ${CLAUDE_PLUGIN_ROOT}/hooks/capture-done.ts",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
