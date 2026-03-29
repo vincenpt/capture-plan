@@ -28,7 +28,12 @@ export interface SessionState {
 
 export const HOOKS_DIR = dirname(Bun.main);
 export const PLUGIN_ROOT = dirname(HOOKS_DIR);
-export const STATE_DIR = join(HOOKS_DIR, "state");
+export let STATE_DIR = join(HOOKS_DIR, "state");
+
+/** @internal Test-only setter for STATE_DIR */
+export function _setStateDirForTest(dir: string): void {
+  STATE_DIR = dir;
+}
 const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.config.toml");
 const USER_GLOBAL_CONFIG = join(homedir(), ".config", "capture-plan", "config.toml");
 
