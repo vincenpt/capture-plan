@@ -57,32 +57,37 @@ afterEach(() => {
 // ---- nextCounter ----
 
 describe("nextCounter", () => {
-  it("returns 1 on first call", async () => {
-    expect(await shared.nextCounter("2026-03-29")).toBe(1);
+  it("returns 1 when directory does not exist", () => {
+    expect(shared.nextCounter(join(tempDir, "no-such-dir"))).toBe(1);
   });
 
-  it("increments on subsequent calls", async () => {
-    expect(await shared.nextCounter("2026-03-29")).toBe(1);
-    expect(await shared.nextCounter("2026-03-29")).toBe(2);
-    expect(await shared.nextCounter("2026-03-29")).toBe(3);
+  it("returns 1 when directory is empty", () => {
+    const dateDir = join(tempDir, "empty-date");
+    mkdirSync(dateDir, { recursive: true });
+    expect(shared.nextCounter(dateDir)).toBe(1);
   });
 
-  it("uses independent counters for different date keys", async () => {
-    expect(await shared.nextCounter("2026-03-29")).toBe(1);
-    expect(await shared.nextCounter("2026-03-30")).toBe(1);
-    expect(await shared.nextCounter("2026-03-29")).toBe(2);
+  it("returns max + 1 when folders exist", () => {
+    const dateDir = join(tempDir, "with-plans");
+    mkdirSync(join(dateDir, "001-first-plan"), { recursive: true });
+    mkdirSync(join(dateDir, "002-second-plan"), { recursive: true });
+    expect(shared.nextCounter(dateDir)).toBe(3);
   });
 
-  it("handles concurrent calls with unique values", async () => {
-    const results = await Promise.all([
-      shared.nextCounter("2026-03-29"),
-      shared.nextCounter("2026-03-29"),
-      shared.nextCounter("2026-03-29"),
-      shared.nextCounter("2026-03-29"),
-      shared.nextCounter("2026-03-29"),
-    ]);
-    const sorted = [...results].sort((a, b) => a - b);
-    expect(sorted).toEqual([1, 2, 3, 4, 5]);
+  it("finds the maximum counter, not just the last entry", () => {
+    const dateDir = join(tempDir, "unordered");
+    mkdirSync(join(dateDir, "003-third"), { recursive: true });
+    mkdirSync(join(dateDir, "001-first"), { recursive: true });
+    mkdirSync(join(dateDir, "005-fifth"), { recursive: true });
+    expect(shared.nextCounter(dateDir)).toBe(6);
+  });
+
+  it("ignores entries that don't match NNN- pattern", () => {
+    const dateDir = join(tempDir, "mixed");
+    mkdirSync(join(dateDir, "001-valid-plan"), { recursive: true });
+    mkdirSync(join(dateDir, "notes"), { recursive: true });
+    mkdirSync(join(dateDir, ".hidden"), { recursive: true });
+    expect(shared.nextCounter(dateDir)).toBe(2);
   });
 });
 

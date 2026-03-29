@@ -2,6 +2,7 @@
 // capture-plan.ts — Claude Code Hook for ExitPlanMode
 // Captures plans and persists them to Obsidian vault
 
+import { join } from "node:path";
 import {
   debugLog,
   loadConfig,
@@ -13,6 +14,7 @@ import {
   mergeTagsOnDailyNote,
   getDateParts,
   getJournalPath,
+  getVaultPath,
   appendToJournal,
   nextCounter,
   padCounter,
@@ -91,17 +93,20 @@ async function main(): Promise<void> {
     const slug = toSlug(title);
     const { dd, mm, yyyy, dateKey, datetime, timeStr, ampmTime } = getDateParts();
 
+    const config = await loadConfig(payload.cwd);
+    const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+
     debugLog(
-      `HOOK=${hookEvent} SRC=${planSource} FILE=${planFile} TITLE=${title} SLUG=${slug}\n`,
+      `HOOK=${hookEvent} SRC=${planSource} FILE=${planFile} TITLE=${title} SLUG=${slug} DATE_DIR=${dateDirRelative}\n`,
       DEBUG_LOG,
     );
 
-    const config = await loadConfig(payload.cwd);
-    const counter = await nextCounter(dateKey);
+    const vaultPath = getVaultPath(config.vault);
+    const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null;
+    const counter = dateDirAbsolute ? nextCounter(dateDirAbsolute) : 1;
     const { summary, tags: newTags } = await summarizeWithClaude(planContent, PLAN_SYSTEM_PROMPT);
 
-    // New path: Claude/Plans/<yyyy>/<mm-dd>/<counter>-<slug>/plan
-    const planDir = `${config.plan_path}/${yyyy}/${mm}-${dd}/${padCounter(counter)}-${slug}`;
+    const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`;
     const planPath = `${planDir}/plan`;
 
     const journalPath = getJournalPath(config);

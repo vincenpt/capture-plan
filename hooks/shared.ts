@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // shared.ts — Shared utilities for capture-plan and capture-done hooks
 
-import { appendFileSync, mkdirSync, rmdirSync, readdirSync, statSync } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -360,50 +360,21 @@ export async function appendRowToJournalSection(
 
 // ---- Counter (per-day, mkdir-locked) ----
 
-export async function nextCounter(dateKey: string): Promise<number> {
-  const counterDir = join(STATE_DIR, "counters");
-  const counterFile = join(counterDir, `${dateKey}.json`);
-  const lockDir = join(counterDir, `${dateKey}.lock`);
-
-  mkdirSync(counterDir, { recursive: true });
-
-  // Clean up stale locks (older than 30 seconds)
+export function nextCounter(dateDirPath: string): number {
   try {
-    const lockStat = statSync(lockDir);
-    if (Date.now() - lockStat.mtimeMs > 30_000) {
-      try { rmdirSync(lockDir); } catch { /* */ }
-    }
-  } catch { /* lock doesn't exist, good */ }
-
-  const maxWait = 5000;
-  const start = Date.now();
-  let locked = false;
-  while (Date.now() - start < maxWait) {
-    try {
-      mkdirSync(lockDir);
-      locked = true;
-      break;
-    } catch (err: any) {
-      if (err?.code === "EEXIST") {
-        await Bun.sleep(50);
-      } else {
-        break;
+    const entries = readdirSync(dateDirPath);
+    let max = 0;
+    for (const entry of entries) {
+      const match = entry.match(/^(\d{3,})-/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > max) max = num;
       }
     }
-  }
-
-  try {
-    let current = 0;
-    try {
-      current = JSON.parse(await Bun.file(counterFile).text()).value || 0;
-    } catch { /* first use */ }
-    const next = current + 1;
-    await Bun.write(counterFile, JSON.stringify({ value: next }));
-    return next;
-  } finally {
-    if (locked) {
-      try { rmdirSync(lockDir); } catch { /* */ }
-    }
+    return max + 1;
+  } catch (err: any) {
+    if (err?.code === "ENOENT") return 1;
+    throw err;
   }
 }
 
