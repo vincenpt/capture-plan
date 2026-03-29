@@ -42,7 +42,7 @@ Claude/Plans/<yyyy>/<mm-dd>/<counter>-<slug>/summary.md
    ```json
    {
      "extraKnownMarketplaces": {
-       "capture-plan": {
+       "kriswill": {
          "source": {
            "source": "github",
            "repo": "kriswill/capture-plan"
@@ -55,7 +55,7 @@ Claude/Plans/<yyyy>/<mm-dd>/<counter>-<slug>/summary.md
 2. Inside Claude Code, install the plugin:
 
    ```
-   /plugin install capture-plan@capture-plan
+   /plugin install capture-plan@kriswill
    ```
 
 3. Activate the hooks:
@@ -71,7 +71,7 @@ Claude/Plans/<yyyy>/<mm-dd>/<counter>-<slug>/summary.md
    ```json
    {
      "extraKnownMarketplaces": {
-       "capture-plan": {
+       "kriswill": {
          "source": {
            "source": "github",
            "repo": "kriswill/capture-plan"
@@ -79,7 +79,7 @@ Claude/Plans/<yyyy>/<mm-dd>/<counter>-<slug>/summary.md
        }
      },
      "enabledPlugins": {
-       "capture-plan@capture-plan": true
+       "capture-plan@kriswill": true
      }
    }
    ```

@@ -79,8 +79,8 @@ gh release create v{VERSION} --title "v{VERSION}" --notes "{CHANGELOG}"
 Pull the latest into the marketplace cache so `claude plugin update` detects the new version immediately:
 
 ```bash
-if [ -d ~/.claude/plugins/marketplaces/capture-plan ]; then
-  cd ~/.claude/plugins/marketplaces/capture-plan && git pull origin main
+if [ -d ~/.claude/plugins/marketplaces/kriswill ]; then
+  cd ~/.claude/plugins/marketplaces/kriswill && git pull origin main
 fi
 ```
 
@@ -93,7 +93,7 @@ Print the release URL returned by `gh release create`.
 Verify the marketplace cache is current:
 
 ```bash
-cd ~/.claude/plugins/marketplaces/capture-plan && git log --oneline -1
+cd ~/.claude/plugins/marketplaces/kriswill && git log --oneline -1
 ```
 
 Confirm the latest commit message matches `release: v{VERSION}`.
