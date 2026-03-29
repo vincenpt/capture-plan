@@ -1,18 +1,18 @@
 {
-  "name": "capture-plan",
+  "name": "kriswill",
   "owner": {
     "name": "kriswill"
   },
   "metadata": {
     "description": "Captures Claude Code plans and execution summaries to Obsidian",
-    "version": "1.3.2"
+    "version": "0.1.1"
   },
   "plugins": [
     {
       "name": "capture-plan",
       "source": "./",
       "description": "Captures Claude Code plans and execution summaries to an Obsidian vault with daily journal integration",
-      "version": "1.3.2",
+      "version": "0.1.1",
       "author": {
         "name": "kriswill"
       },
