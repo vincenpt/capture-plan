@@ -71,6 +71,29 @@ Then create the release using `gh` with the changelog from step 3:
 gh release create v{VERSION} --title "v{VERSION}" --notes "{CHANGELOG}"
 ```
 
-### 7. Confirm
+### 7. Update local marketplace cache
+
+> **Workaround for CLI bug** ([anthropics/claude-code#37252](https://github.com/anthropics/claude-code/issues/37252)):
+> `claude plugin update` reads versions from a local git clone without fetching from the remote first.
+
+Pull the latest into the marketplace cache so `claude plugin update` detects the new version immediately:
+
+```bash
+if [ -d ~/.claude/plugins/marketplaces/capture-plan ]; then
+  cd ~/.claude/plugins/marketplaces/capture-plan && git pull origin main
+fi
+```
+
+Skip silently if the directory doesn't exist (e.g., plugin not installed locally).
+
+### 8. Confirm
 
 Print the release URL returned by `gh release create`.
+
+Verify the marketplace cache is current:
+
+```bash
+cd ~/.claude/plugins/marketplaces/capture-plan && git log --oneline -1
+```
+
+Confirm the latest commit message matches `release: v{VERSION}`.
