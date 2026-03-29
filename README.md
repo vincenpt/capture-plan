@@ -37,31 +37,16 @@ Claude/Plans/<yyyy>/<mm-dd>/<counter>-<slug>/summary.md
 
 ### Option A: CLI (recommended)
 
-1. Register the marketplace by adding the following to `~/.claude/settings.json`:
+1. Add the marketplace:
 
-   ```json
-   {
-     "extraKnownMarketplaces": {
-       "kriswill": {
-         "source": {
-           "source": "github",
-           "repo": "kriswill/capture-plan"
-         }
-       }
-     }
-   }
+   ```sh
+   claude plugin marketplace add kriswill/capture-plan
    ```
 
-2. Inside Claude Code, install the plugin:
+2. Install the plugin:
 
-   ```
-   /plugin install capture-plan@kriswill
-   ```
-
-3. Activate the hooks:
-
-   ```
-   /reload-plugins
+   ```sh
+   claude plugin install capture-plan@kriswill
    ```
 
 ### Option B: Manual settings.json
