@@ -121,7 +121,6 @@ source: Claude Code (Plan Mode)
 session: ${sessionId}
 counter: ${counter}
 ---
-
 # ${title}
 
 ${stripTitleLine(planContent)}

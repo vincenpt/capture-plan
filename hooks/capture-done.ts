@@ -136,7 +136,6 @@ plan: "[[${state.plan_dir}/plan|${state.plan_title}]]"
 summary: "${summary.replace(/"/g, '\\"')}"
 counter: ${state.counter}
 ---
-
 # Done: ${state.plan_title}
 
 ## Summary
