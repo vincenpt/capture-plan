@@ -33,27 +33,31 @@ Update the version string in ALL of these files — missing any one will cause t
 
 Use the Edit tool with `replace_all: true` for marketplace.json since both version fields should have the same value.
 
-### 3. Run tests
+### 3. Generate changelog (before committing)
+
+Generate the changelog **before** the release commit so it captures meaningful changes:
+
+```bash
+git log $(git describe --tags --abbrev=0)..HEAD --oneline --no-decorate
+```
+
+If there is no previous tag, use `git log --oneline --no-decorate` for the full history.
+
+Format as a markdown bullet list. If the only commits are previous release commits (no feature/fix commits), use a single line: `Patch release — version bump only.`
+
+### 4. Run tests
 
 Run `bun test` and confirm all tests pass. If tests fail, stop and fix before continuing.
 
-### 4. Commit and tag
+### 5. Commit and tag
+
+GPG signing is enabled — tags require the `-m` flag or they fail with "no tag message?".
 
 ```bash
 git add package.json .claude-plugin/plugin.json .claude-plugin/marketplace.json
 git commit -m "release: v{VERSION}"
-git tag v{VERSION}
+git tag -m "v{VERSION}" v{VERSION}
 ```
-
-### 5. Generate changelog
-
-Get the commit log since the previous tag:
-
-```bash
-git log $(git describe --tags --abbrev=0 HEAD^)..HEAD --oneline --no-decorate
-```
-
-If there is no previous tag, use `git log --oneline --no-decorate` for the full history.
 
 ### 6. Push and create GitHub release
 
@@ -61,13 +65,11 @@ If there is no previous tag, use `git log --oneline --no-decorate` for the full 
 git push && git push --tags
 ```
 
-Then create the release using `gh`:
+Then create the release using `gh` with the changelog from step 3:
 
 ```bash
 gh release create v{VERSION} --title "v{VERSION}" --notes "{CHANGELOG}"
 ```
-
-Format the changelog as a markdown list with each commit as a bullet point. Exclude the release commit itself.
 
 ### 7. Confirm
 
