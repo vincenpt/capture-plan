@@ -15,31 +15,84 @@ Claude/Plans/<yyyy>/<mm-dd>/<counter>-<slug>/summary.md
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) runtime
-- [Obsidian CLI](https://github.com/Vinzent03/obsidian-advanced-uri) (`obsidian` command available on PATH)
-- An Obsidian vault
+1. **[Bun](https://bun.sh)** runtime (v1.0+)
+
+   ```sh
+   bun --version
+   ```
+
+2. **[Obsidian CLI](https://obsidian.md)** — the `obsidian` command must be available on PATH
+
+   ```sh
+   obsidian --help    # should print "Obsidian CLI" and a list of commands
+   ```
+
+3. **An Obsidian vault** — verify yours is visible to the CLI:
+
+   ```sh
+   obsidian vaults    # should list your vault names
+   ```
 
 ## Installation
 
-Add to your `~/.claude/settings.json`:
+### Option A: CLI (recommended)
 
-```json
-{
-  "extraKnownMarketplaces": {
-    "capture-plan": {
-      "source": {
-        "source": "github",
-        "repo": "kriswill/capture-plan"
-      }
-    }
-  },
-  "enabledPlugins": {
-    "capture-plan@capture-plan": true
-  }
-}
-```
+1. Register the marketplace by adding the following to `~/.claude/settings.json`:
 
-Restart Claude Code. The plugin will be installed automatically.
+   ```json
+   {
+     "extraKnownMarketplaces": {
+       "capture-plan": {
+         "source": {
+           "source": "github",
+           "repo": "kriswill/capture-plan"
+         }
+       }
+     }
+   }
+   ```
+
+2. Inside Claude Code, install the plugin:
+
+   ```
+   /plugin install capture-plan@capture-plan
+   ```
+
+3. Activate the hooks:
+
+   ```
+   /reload-plugins
+   ```
+
+### Option B: Manual settings.json
+
+1. Add both the marketplace and the enabled flag to `~/.claude/settings.json`:
+
+   ```json
+   {
+     "extraKnownMarketplaces": {
+       "capture-plan": {
+         "source": {
+           "source": "github",
+           "repo": "kriswill/capture-plan"
+         }
+       }
+     },
+     "enabledPlugins": {
+       "capture-plan@capture-plan": true
+     }
+   }
+   ```
+
+2. Restart Claude Code, or run `/reload-plugins` inside an active session.
+
+### Verify
+
+After installation, confirm the hooks are active:
+
+- `/reload-plugins` output should include the capture-plan hooks in its count.
+- Enter plan mode, write a plan, and exit. Check that a note appears under `Claude/Plans/` in your vault.
+- Debug logs are written to `/tmp/capture-plan-debug.log` and `/tmp/capture-done-debug.log`.
 
 ## Configuration
 
