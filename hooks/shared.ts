@@ -34,6 +34,7 @@ export interface PlanFrontmatter {
   counter?: number;
   session?: string;
   project?: string;
+  source_slug?: string;
 }
 
 // ---- Paths ----
@@ -262,6 +263,13 @@ export function getProjectName(cwd?: string): string {
   return basename(cwd);
 }
 
+export function getProjectLabel(cwd?: string): string {
+  if (!cwd) return "unknown";
+  const base = basename(cwd);
+  const parent = basename(dirname(cwd));
+  return parent && parent !== "." ? `${parent}/${base}` : base;
+}
+
 export function shortSessionId(id: string): string {
   return id.slice(0, 8);
 }
@@ -476,6 +484,10 @@ export function parsePlanFrontmatter(content: string): PlanFrontmatter {
   // project
   const projectMatch = fm.match(/^project:\s*(.+)/m);
   if (projectMatch) result.project = projectMatch[1].trim();
+
+  // source_slug (for backport dedup)
+  const sourceSlugMatch = fm.match(/^source_slug:\s*(.+)/m);
+  if (sourceSlugMatch) result.source_slug = sourceSlugMatch[1].trim();
 
   // tags (YAML list format)
   const tagsSection = fm.match(/^tags:\n((?:\s+-\s+.+\n?)*)/m);

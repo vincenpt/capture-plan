@@ -6,8 +6,11 @@ import {
   discoverPlans,
   filterPlans,
   backportPlans,
-  checkJournalEntry,
+  buildSlugProjectMap,
+  getImportedSlugs,
   parseArgs,
+  _setPlansDirForTest,
+  _setProjectsDirForTest,
   type PlanInfo,
 } from "../backport-journal.ts";
 import type { Config } from "../shared.ts";
@@ -16,6 +19,8 @@ import type { Config } from "../shared.ts";
 
 let tempDir: string;
 let vaultPath: string;
+let plansDir: string;
+let projectsDir: string;
 
 const TEST_CONFIG: Config = {
   vault: "TestVault",
@@ -23,16 +28,30 @@ const TEST_CONFIG: Config = {
   journal_path: "Journal",
 };
 
-function makePlanNote(opts: {
+function makePlanFile(slug: string, content: string): string {
+  const filePath = join(plansDir, `${slug}.md`);
+  writeFileSync(filePath, content);
+  return filePath;
+}
+
+function makeSessionJsonl(projectSlug: string, entries: Array<{ slug: string; cwd: string }>): void {
+  const dirPath = join(projectsDir, projectSlug);
+  mkdirSync(dirPath, { recursive: true });
+  const sessionId = `test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const lines = entries.map((e) =>
+    JSON.stringify({ type: "user", slug: e.slug, cwd: e.cwd, sessionId }),
+  );
+  writeFileSync(join(dirPath, `${sessionId}.jsonl`), lines.join("\n"));
+}
+
+function makeVaultPlanNote(opts: {
   year: string;
   dateDir: string;
   counter: string;
   slug: string;
   title: string;
-  journalPath?: string;
-  datetime?: string;
-  tags?: string[];
-}): string {
+  sourceSlug?: string;
+}): void {
   const planDir = join(
     vaultPath,
     "Claude/Plans",
@@ -42,33 +61,15 @@ function makePlanNote(opts: {
   );
   mkdirSync(planDir, { recursive: true });
 
-  const jp = opts.journalPath || `Journal/${opts.year}/03-March/29-Sunday`;
-  const dt = opts.datetime || `${opts.year}-${opts.dateDir.replace("-", "-")}T14:30`;
-  const tags = opts.tags || ["plan", "claude-session"];
-  const tagsYaml = tags.map((t) => `  - ${t}`).join("\n");
-
+  const sourceSlugLine = opts.sourceSlug ? `\nsource_slug: ${opts.sourceSlug}` : "";
   const content = `---
-created: "[[${jp}|${dt}]]"
-status: planned
-tags:
-${tagsYaml}
-source: Claude Code (Plan Mode)
-session: test-session
-counter: ${parseInt(opts.counter, 10)}
+created: "[[Journal/${opts.year}/03-March/29-Sunday|${opts.year}-03-29T14:30]]"${sourceSlugLine}
 ---
 # ${opts.title}
 
-This is the plan body for ${opts.title}.
+Plan body for ${opts.title}.
 `;
-
   writeFileSync(join(planDir, "plan.md"), content);
-  return planDir;
-}
-
-function makeJournalFile(journalPath: string, content: string): void {
-  const filePath = join(vaultPath, `${journalPath}.md`);
-  mkdirSync(join(filePath, ".."), { recursive: true });
-  writeFileSync(filePath, content);
 }
 
 beforeEach(() => {
@@ -77,7 +78,13 @@ beforeEach(() => {
     `bp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   );
   vaultPath = join(tempDir, "vault");
+  plansDir = join(tempDir, "plans");
+  projectsDir = join(tempDir, "projects");
   mkdirSync(vaultPath, { recursive: true });
+  mkdirSync(plansDir, { recursive: true });
+  mkdirSync(projectsDir, { recursive: true });
+  _setPlansDirForTest(plansDir);
+  _setProjectsDirForTest(projectsDir);
 });
 
 afterEach(() => {
@@ -109,9 +116,13 @@ describe("parseArgs", () => {
     expect(args.to).toBe("2026-03-31");
   });
 
-  it("parses --plans as comma-separated list", () => {
-    const args = parseArgs(["--plans=dir1,dir2,dir3"]);
-    expect(args.plans).toEqual(["dir1", "dir2", "dir3"]);
+  it("parses --plans as comma-separated slugs", () => {
+    const args = parseArgs(["--plans=fuzzy-llama,crispy-anchor"]);
+    expect(args.plans).toEqual(["fuzzy-llama", "crispy-anchor"]);
+  });
+
+  it("parses --project filter", () => {
+    expect(parseArgs(["--project=capture-plan"]).project).toBe("capture-plan");
   });
 
   it("parses --cwd", () => {
@@ -134,207 +145,206 @@ describe("parseArgs", () => {
     expect(args.from).toBeUndefined();
     expect(args.to).toBeUndefined();
     expect(args.plans).toBeUndefined();
+    expect(args.project).toBeUndefined();
+  });
+});
+
+// ---- buildSlugProjectMap ----
+
+describe("buildSlugProjectMap", () => {
+  it("maps slug to cwd from session JSONL", () => {
+    makeSessionJsonl("-Users-k-src-myproject", [
+      { slug: "fuzzy-llama", cwd: "/Users/k/src/myproject" },
+    ]);
+
+    const map = buildSlugProjectMap();
+    expect(map.get("fuzzy-llama")).toBe("/Users/k/src/myproject");
+  });
+
+  it("handles multiple projects", () => {
+    makeSessionJsonl("-Users-k-src-project-a", [
+      { slug: "plan-alpha", cwd: "/Users/k/src/project-a" },
+    ]);
+    makeSessionJsonl("-Users-k-src-project-b", [
+      { slug: "plan-beta", cwd: "/Users/k/src/project-b" },
+    ]);
+
+    const map = buildSlugProjectMap();
+    expect(map.get("plan-alpha")).toBe("/Users/k/src/project-a");
+    expect(map.get("plan-beta")).toBe("/Users/k/src/project-b");
+  });
+
+  it("first match wins (does not overwrite)", () => {
+    makeSessionJsonl("-project-1", [
+      { slug: "same-slug", cwd: "/first/cwd" },
+    ]);
+    makeSessionJsonl("-project-2", [
+      { slug: "same-slug", cwd: "/second/cwd" },
+    ]);
+
+    const map = buildSlugProjectMap();
+    // Should have one of the two (first found)
+    expect(map.has("same-slug")).toBe(true);
+  });
+
+  it("returns empty map when projects dir is empty", () => {
+    const map = buildSlugProjectMap();
+    expect(map.size).toBe(0);
+  });
+
+  it("skips malformed JSONL lines", () => {
+    const dirPath = join(projectsDir, "-test-project");
+    mkdirSync(dirPath, { recursive: true });
+    writeFileSync(
+      join(dirPath, "session.jsonl"),
+      `not valid json\n{"slug":"valid","cwd":"/valid/path"}\n{broken\n`,
+    );
+
+    const map = buildSlugProjectMap();
+    expect(map.get("valid")).toBe("/valid/path");
+  });
+});
+
+// ---- getImportedSlugs ----
+
+describe("getImportedSlugs", () => {
+  it("finds source_slug in vault plan frontmatter", () => {
+    makeVaultPlanNote({
+      year: "2026",
+      dateDir: "03-29",
+      counter: "001",
+      slug: "my-plan",
+      title: "My Plan",
+      sourceSlug: "fuzzy-llama",
+    });
+
+    const imported = getImportedSlugs(vaultPath, "Claude/Plans");
+    expect(imported.has("fuzzy-llama")).toBe(true);
+  });
+
+  it("returns empty set for missing vault dir", () => {
+    const imported = getImportedSlugs(vaultPath, "Claude/Plans");
+    expect(imported.size).toBe(0);
+  });
+
+  it("ignores plans without source_slug", () => {
+    makeVaultPlanNote({
+      year: "2026",
+      dateDir: "03-29",
+      counter: "001",
+      slug: "old-plan",
+      title: "Old Plan",
+    });
+
+    const imported = getImportedSlugs(vaultPath, "Claude/Plans");
+    expect(imported.size).toBe(0);
+  });
+
+  it("finds multiple imported slugs", () => {
+    makeVaultPlanNote({
+      year: "2026",
+      dateDir: "03-29",
+      counter: "001",
+      slug: "plan-a",
+      title: "Plan A",
+      sourceSlug: "slug-a",
+    });
+    makeVaultPlanNote({
+      year: "2026",
+      dateDir: "03-29",
+      counter: "002",
+      slug: "plan-b",
+      title: "Plan B",
+      sourceSlug: "slug-b",
+    });
+
+    const imported = getImportedSlugs(vaultPath, "Claude/Plans");
+    expect(imported.has("slug-a")).toBe(true);
+    expect(imported.has("slug-b")).toBe(true);
   });
 });
 
 // ---- discoverPlans ----
 
 describe("discoverPlans", () => {
-  it("discovers plans in the expected directory structure", () => {
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-29",
-      counter: "001",
-      slug: "my-plan",
-      title: "My Plan",
-    });
+  it("discovers .md files from plans dir", () => {
+    makePlanFile("fuzzy-llama", "# My Cool Plan\n\nDo stuff.");
 
     const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
     expect(plans).toHaveLength(1);
-    expect(plans[0].title).toBe("My Plan");
-    expect(plans[0].planDir).toBe("Claude/Plans/2026/03-29/001-my-plan");
-    expect(plans[0].planPath).toBe("Claude/Plans/2026/03-29/001-my-plan/plan");
-    expect(plans[0].date).toBe("2026-03-29");
+    expect(plans[0].sourceSlug).toBe("fuzzy-llama");
+    expect(plans[0].title).toBe("My Cool Plan");
+    expect(plans[0].isImported).toBe(false);
   });
 
-  it("discovers multiple plans across different dates", () => {
-    makePlanNote({
+  it("filters out -agent- variant files", () => {
+    makePlanFile("fuzzy-llama", "# Main Plan\n\nContent.");
+    makePlanFile("fuzzy-llama-agent-abc123def", "# Agent Sub-Plan\n\nSub content.");
+
+    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    expect(plans).toHaveLength(1);
+    expect(plans[0].sourceSlug).toBe("fuzzy-llama");
+  });
+
+  it("resolves project from session JSONL", () => {
+    makePlanFile("fuzzy-llama", "# Plan With Project\n\nContent.");
+    makeSessionJsonl("-Users-k-src-myproject", [
+      { slug: "fuzzy-llama", cwd: "/Users/k/src/myproject" },
+    ]);
+
+    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    expect(plans[0].projectCwd).toBe("/Users/k/src/myproject");
+    expect(plans[0].projectLabel).toBe("src/myproject");
+  });
+
+  it("detects already-imported plans", () => {
+    makePlanFile("fuzzy-llama", "# Already Imported\n\nContent.");
+    makeVaultPlanNote({
       year: "2026",
       dateDir: "03-29",
       counter: "001",
-      slug: "plan-a",
-      title: "Plan A",
-      journalPath: "Journal/2026/03-March/29-Sunday",
-      datetime: "2026-03-29T10:00",
-    });
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-30",
-      counter: "001",
-      slug: "plan-b",
-      title: "Plan B",
-      journalPath: "Journal/2026/03-March/30-Monday",
-      datetime: "2026-03-30T11:00",
+      slug: "already-imported",
+      title: "Already Imported",
+      sourceSlug: "fuzzy-llama",
     });
 
     const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
-    expect(plans).toHaveLength(2);
-    expect(plans[0].date).toBe("2026-03-29");
-    expect(plans[1].date).toBe("2026-03-30");
+    expect(plans[0].isImported).toBe(true);
   });
 
-  it("discovers multiple plans on the same date", () => {
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-29",
-      counter: "001",
-      slug: "first",
-      title: "First",
-    });
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-29",
-      counter: "002",
-      slug: "second",
-      title: "Second",
-    });
-
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
-    expect(plans).toHaveLength(2);
-  });
-
-  it("returns empty array when plan directory does not exist", () => {
+  it("returns empty for empty plans dir", () => {
     const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
     expect(plans).toEqual([]);
   });
 
-  it("ignores non-matching directories", () => {
-    // Create some non-matching structure
-    mkdirSync(join(vaultPath, "Claude/Plans/notes"), { recursive: true });
-    mkdirSync(join(vaultPath, "Claude/Plans/2026/random"), { recursive: true });
-    mkdirSync(join(vaultPath, "Claude/Plans/2026/03-29/no-counter"), {
-      recursive: true,
-    });
-
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
-    expect(plans).toEqual([]);
-  });
-
-  it("extracts journal path from frontmatter", () => {
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-29",
-      counter: "001",
-      slug: "test",
-      title: "Test",
-      journalPath: "Journal/2026/03-March/29-Sunday",
-    });
-
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
-    expect(plans[0].journalPath).toBe("Journal/2026/03-March/29-Sunday");
-  });
-
-  it("extracts time from frontmatter datetime", () => {
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-29",
-      counter: "001",
-      slug: "test",
-      title: "Test",
-      datetime: "2026-03-29T14:30",
-    });
-
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
-    expect(plans[0].time).toBe("14:30");
-    expect(plans[0].ampmTime).toBe("2:30 PM");
-  });
-
-  it("handles plan without frontmatter", () => {
-    const planDir = join(
-      vaultPath,
-      "Claude/Plans/2026/03-29/001-bare-plan",
-    );
-    mkdirSync(planDir, { recursive: true });
-    writeFileSync(
-      join(planDir, "plan.md"),
-      "# Bare Plan\n\nNo frontmatter here.",
-    );
+  it("ignores non-.md files", () => {
+    writeFileSync(join(plansDir, "notes.txt"), "not a plan");
+    writeFileSync(join(plansDir, "data.json"), "{}");
+    makePlanFile("real-plan", "# Real Plan\n\nContent.");
 
     const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
     expect(plans).toHaveLength(1);
-    expect(plans[0].title).toBe("Bare Plan");
-    expect(plans[0].date).toBe("2026-03-29");
+    expect(plans[0].sourceSlug).toBe("real-plan");
   });
 
-  it("sorts plans by date then directory", () => {
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-30",
-      counter: "001",
-      slug: "later",
-      title: "Later",
-      datetime: "2026-03-30T10:00",
-    });
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-29",
-      counter: "001",
-      slug: "earlier",
-      title: "Earlier",
-      datetime: "2026-03-29T10:00",
-    });
+  it("sorts by date then slug", () => {
+    // Create files with different birthtimes (best effort — file system may not differentiate)
+    makePlanFile("aaa-first", "# AAA First\n\nContent.");
+    makePlanFile("zzz-second", "# ZZZ Second\n\nContent.");
 
     const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
-    expect(plans[0].title).toBe("Earlier");
-    expect(plans[1].title).toBe("Later");
-  });
-});
-
-// ---- checkJournalEntry ----
-
-describe("checkJournalEntry", () => {
-  it("returns true when journal contains a link to the plan", () => {
-    makeJournalFile("Journal/2026/03-March/29-Sunday", `### My Plan
-
-| | |
-|---|---|
-| [[Claude/Plans/2026/03-29/001-my-plan/plan|2:30 PM]] | Summary |
-`);
-
-    expect(
-      checkJournalEntry(
-        vaultPath,
-        "Journal/2026/03-March/29-Sunday",
-        "Claude/Plans/2026/03-29/001-my-plan/plan",
-      ),
-    ).toBe(true);
+    expect(plans).toHaveLength(2);
+    // Same date (created at almost the same time), sorted by slug
+    expect(plans[0].sourceSlug).toBe("aaa-first");
+    expect(plans[1].sourceSlug).toBe("zzz-second");
   });
 
-  it("returns false when journal does not contain the plan link", () => {
-    makeJournalFile("Journal/2026/03-March/29-Sunday", `### Other Plan
+  it("sets projectLabel to 'unknown' when no session match", () => {
+    makePlanFile("orphan-plan", "# Orphan\n\nNo session.");
 
-| | |
-|---|---|
-| [[Claude/Plans/2026/03-29/002-other/plan|3:00 PM]] | Other |
-`);
-
-    expect(
-      checkJournalEntry(
-        vaultPath,
-        "Journal/2026/03-March/29-Sunday",
-        "Claude/Plans/2026/03-29/001-my-plan/plan",
-      ),
-    ).toBe(false);
-  });
-
-  it("returns false when journal file does not exist", () => {
-    expect(
-      checkJournalEntry(
-        vaultPath,
-        "Journal/2026/03-March/29-Sunday",
-        "Claude/Plans/2026/03-29/001-my-plan/plan",
-      ),
-    ).toBe(false);
+    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    expect(plans[0].projectLabel).toBe("unknown");
+    expect(plans[0].projectCwd).toBe("");
   });
 });
 
@@ -343,46 +353,43 @@ describe("checkJournalEntry", () => {
 describe("filterPlans", () => {
   const plans: PlanInfo[] = [
     {
-      planDir: "Claude/Plans/2026/01-15/001-jan",
-      planPath: "Claude/Plans/2026/01-15/001-jan/plan",
+      sourceSlug: "jan-plan",
+      sourcePath: "/tmp/plans/jan-plan.md",
       title: "Jan Plan",
       date: "2026-01-15",
       time: "10:00",
       ampmTime: "10:00 AM",
-      journalPath: "Journal/2026/01-January/15-Wednesday",
-      tags: ["plan"],
-      hasJournalEntry: false,
+      projectCwd: "/Users/k/src/project-a",
+      projectLabel: "src/project-a",
+      isImported: false,
     },
     {
-      planDir: "Claude/Plans/2026/03-29/001-mar",
-      planPath: "Claude/Plans/2026/03-29/001-mar/plan",
+      sourceSlug: "mar-plan",
+      sourcePath: "/tmp/plans/mar-plan.md",
       title: "Mar Plan",
       date: "2026-03-29",
       time: "14:30",
       ampmTime: "2:30 PM",
-      journalPath: "Journal/2026/03-March/29-Sunday",
-      tags: ["plan"],
-      hasJournalEntry: false,
+      projectCwd: "/Users/k/src/project-b",
+      projectLabel: "src/project-b",
+      isImported: false,
     },
     {
-      planDir: "Claude/Plans/2026/06-10/001-jun",
-      planPath: "Claude/Plans/2026/06-10/001-jun/plan",
+      sourceSlug: "jun-plan",
+      sourcePath: "/tmp/plans/jun-plan.md",
       title: "Jun Plan",
       date: "2026-06-10",
       time: "09:00",
       ampmTime: "9:00 AM",
-      journalPath: "Journal/2026/06-June/10-Wednesday",
-      tags: ["plan"],
-      hasJournalEntry: true,
+      projectCwd: "/Users/k/src/project-a",
+      projectLabel: "src/project-a",
+      isImported: true,
     },
   ];
 
   it("filters by --from date", () => {
     const filtered = filterPlans(plans, {
-      list: false,
-      all: false,
-      dryRun: false,
-      skipSummarize: false,
+      list: false, all: false, dryRun: false, skipSummarize: false,
       from: "2026-03-01",
     });
     expect(filtered).toHaveLength(2);
@@ -392,10 +399,7 @@ describe("filterPlans", () => {
 
   it("filters by --to date", () => {
     const filtered = filterPlans(plans, {
-      list: false,
-      all: false,
-      dryRun: false,
-      skipSummarize: false,
+      list: false, all: false, dryRun: false, skipSummarize: false,
       to: "2026-03-31",
     });
     expect(filtered).toHaveLength(2);
@@ -405,24 +409,35 @@ describe("filterPlans", () => {
 
   it("filters by date range", () => {
     const filtered = filterPlans(plans, {
-      list: false,
-      all: false,
-      dryRun: false,
-      skipSummarize: false,
-      from: "2026-02-01",
-      to: "2026-04-30",
+      list: false, all: false, dryRun: false, skipSummarize: false,
+      from: "2026-02-01", to: "2026-04-30",
     });
     expect(filtered).toHaveLength(1);
     expect(filtered[0].title).toBe("Mar Plan");
   });
 
-  it("filters by specific plan dirs", () => {
+  it("filters by project label", () => {
     const filtered = filterPlans(plans, {
-      list: false,
-      all: false,
-      dryRun: false,
-      skipSummarize: false,
-      plans: ["Claude/Plans/2026/01-15/001-jan", "Claude/Plans/2026/06-10/001-jun"],
+      list: false, all: false, dryRun: false, skipSummarize: false,
+      project: "project-a",
+    });
+    expect(filtered).toHaveLength(2);
+    expect(filtered[0].title).toBe("Jan Plan");
+    expect(filtered[1].title).toBe("Jun Plan");
+  });
+
+  it("filters by project label case-insensitively", () => {
+    const filtered = filterPlans(plans, {
+      list: false, all: false, dryRun: false, skipSummarize: false,
+      project: "Project-A",
+    });
+    expect(filtered).toHaveLength(2);
+  });
+
+  it("filters by specific plan slugs", () => {
+    const filtered = filterPlans(plans, {
+      list: false, all: false, dryRun: false, skipSummarize: false,
+      plans: ["jan-plan", "jun-plan"],
     });
     expect(filtered).toHaveLength(2);
     expect(filtered[0].title).toBe("Jan Plan");
@@ -431,10 +446,7 @@ describe("filterPlans", () => {
 
   it("returns all when no filters specified", () => {
     const filtered = filterPlans(plans, {
-      list: false,
-      all: false,
-      dryRun: false,
-      skipSummarize: false,
+      list: false, all: false, dryRun: false, skipSummarize: false,
     });
     expect(filtered).toHaveLength(3);
   });
@@ -443,24 +455,20 @@ describe("filterPlans", () => {
 // ---- backportPlans ----
 
 describe("backportPlans", () => {
-  it("skips plans that already have journal entries", async () => {
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-29",
-      counter: "001",
-      slug: "existing",
-      title: "Existing",
-    });
+  it("skips plans that are already imported", async () => {
+    makePlanFile("imported-plan", "# Imported Plan\n\nContent.");
 
-    makeJournalFile("Journal/2026/03-March/29-Sunday", `### Existing
-
-| | |
-|---|---|
-| [[Claude/Plans/2026/03-29/001-existing/plan|2:30 PM]] | Already here |
-`);
-
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
-    expect(plans[0].hasJournalEntry).toBe(true);
+    const plans: PlanInfo[] = [{
+      sourceSlug: "imported-plan",
+      sourcePath: join(plansDir, "imported-plan.md"),
+      title: "Imported Plan",
+      date: "2026-03-29",
+      time: "14:30",
+      ampmTime: "2:30 PM",
+      projectCwd: "/Users/k/src/project",
+      projectLabel: "src/project",
+      isImported: true,
+    }];
 
     const result = await backportPlans(plans, vaultPath, TEST_CONFIG, {
       dryRun: true,
@@ -471,18 +479,23 @@ describe("backportPlans", () => {
     expect(result.skipped).toBe(1);
     expect(result.created).toBe(0);
     expect(result.details[0].status).toBe("skipped");
+    expect(result.details[0].reason).toBe("Already imported");
   });
 
   it("counts plans to create in dry-run mode", async () => {
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-29",
-      counter: "001",
-      slug: "new-plan",
-      title: "New Plan",
-    });
+    makePlanFile("new-plan", "# New Plan\n\nSome content for summarization.");
 
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    const plans: PlanInfo[] = [{
+      sourceSlug: "new-plan",
+      sourcePath: join(plansDir, "new-plan.md"),
+      title: "New Plan",
+      date: "2026-03-29",
+      time: "14:30",
+      ampmTime: "2:30 PM",
+      projectCwd: "/Users/k/src/project",
+      projectLabel: "src/project",
+      isImported: false,
+    }];
 
     const result = await backportPlans(plans, vaultPath, TEST_CONFIG, {
       dryRun: true,
@@ -495,30 +508,34 @@ describe("backportPlans", () => {
     expect(result.details[0].title).toBe("New Plan");
   });
 
-  it("handles mixed plans (some with entries, some without)", async () => {
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-29",
-      counter: "001",
-      slug: "has-entry",
-      title: "Has Entry",
-    });
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-29",
-      counter: "002",
-      slug: "no-entry",
-      title: "No Entry",
-    });
+  it("handles mixed plans (some imported, some new)", async () => {
+    makePlanFile("old-plan", "# Old Plan\n\nAlready in vault.");
+    makePlanFile("fresh-plan", "# Fresh Plan\n\nNot yet imported.");
 
-    makeJournalFile("Journal/2026/03-March/29-Sunday", `### Has Entry
-
-| | |
-|---|---|
-| [[Claude/Plans/2026/03-29/001-has-entry/plan|2:30 PM]] | Already here |
-`);
-
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    const plans: PlanInfo[] = [
+      {
+        sourceSlug: "old-plan",
+        sourcePath: join(plansDir, "old-plan.md"),
+        title: "Old Plan",
+        date: "2026-03-29",
+        time: "10:00",
+        ampmTime: "10:00 AM",
+        projectCwd: "",
+        projectLabel: "unknown",
+        isImported: true,
+      },
+      {
+        sourceSlug: "fresh-plan",
+        sourcePath: join(plansDir, "fresh-plan.md"),
+        title: "Fresh Plan",
+        date: "2026-03-29",
+        time: "11:00",
+        ampmTime: "11:00 AM",
+        projectCwd: "/Users/k/src/project",
+        projectLabel: "src/project",
+        isImported: false,
+      },
+    ];
 
     const result = await backportPlans(plans, vaultPath, TEST_CONFIG, {
       dryRun: true,
@@ -531,15 +548,19 @@ describe("backportPlans", () => {
   });
 
   it("reports correct detail fields", async () => {
-    makePlanNote({
-      year: "2026",
-      dateDir: "03-29",
-      counter: "001",
-      slug: "detail-test",
-      title: "Detail Test",
-    });
+    makePlanFile("detail-test", "# Detail Test\n\nVerifying detail output.");
 
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    const plans: PlanInfo[] = [{
+      sourceSlug: "detail-test",
+      sourcePath: join(plansDir, "detail-test.md"),
+      title: "Detail Test",
+      date: "2026-03-29",
+      time: "14:30",
+      ampmTime: "2:30 PM",
+      projectCwd: "/Users/k/src/project",
+      projectLabel: "src/project",
+      isImported: false,
+    }];
 
     const result = await backportPlans(plans, vaultPath, TEST_CONFIG, {
       dryRun: true,
@@ -547,9 +568,31 @@ describe("backportPlans", () => {
     });
 
     expect(result.details[0]).toEqual({
-      planDir: "Claude/Plans/2026/03-29/001-detail-test",
+      planDir: "detail-test",
       title: "Detail Test",
       status: "created",
     });
+  });
+
+  it("handles read errors gracefully", async () => {
+    const plans: PlanInfo[] = [{
+      sourceSlug: "missing-plan",
+      sourcePath: join(plansDir, "nonexistent.md"),
+      title: "Missing Plan",
+      date: "2026-03-29",
+      time: "14:30",
+      ampmTime: "2:30 PM",
+      projectCwd: "",
+      projectLabel: "unknown",
+      isImported: false,
+    }];
+
+    const result = await backportPlans(plans, vaultPath, TEST_CONFIG, {
+      dryRun: true,
+      skipSummarize: true,
+    });
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.details[0].status).toBe("error");
   });
 });

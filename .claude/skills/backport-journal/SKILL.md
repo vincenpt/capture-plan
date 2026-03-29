@@ -5,7 +5,7 @@ description: Backport existing plans into the Obsidian daily journal. Use when p
 
 # Backport Journal
 
-Retroactively create daily journal entries for plans that exist in the Obsidian vault but have no corresponding journal entries.
+Import plans from `~/.claude/plans/` into the Obsidian vault, creating both the vault plan note and a daily journal entry. Plans already imported (tracked via `source_slug` frontmatter) are skipped.
 
 ## Procedure
 
@@ -14,28 +14,42 @@ Retroactively create daily journal entries for plans that exist in the Obsidian 
 Run the discovery script from the plugin root directory to list all plans:
 
 ```bash
-bun hooks/backport-journal.ts --list
+bun hooks/backport-journal.ts --list 2>/dev/null
 ```
 
-Parse the JSON output. Each entry has: `planDir`, `title`, `date`, `hasJournalEntry`. Count how many plans exist total and how many already have journal entries.
+Parse the JSON output. Each entry has: `sourceSlug`, `title`, `date`, `ampmTime`, `projectLabel`, `isImported`.
 
-Tell the user: "Found N plans, M already have journal entries, K are missing entries."
+Count totals:
+- Total plans found in `~/.claude/plans/`
+- Already imported to vault
+- New (not yet imported)
 
-If no plans are missing entries, inform the user and stop.
+Tell the user: "Found N plans in ~/.claude/plans/, M already imported to vault, K are new."
+
+If no new plans exist, inform the user and stop.
+
+List the plans still missing, formatted as:
+
+```
+N. [YYYY-MM-DD HH:MM AM] [project/name] Title
+```
 
 ### 2. Ask selection mode
 
 Use `AskUserQuestion` with these options:
 
-- **All plans** — Backport all plans missing journal entries
-- **Date range** — Specify start and end dates
+- **All new plans** — Import all plans not yet in the vault
+- **Date range** — Specify start and end dates to filter
+- **By project** — Filter by project name
 - **Specific plans** — Pick individual plans from the list
 
 ### 3. Gather selection details
 
 **If "Date range"**: Ask the user for start date and end date (YYYY-MM-DD format).
 
-**If "Specific plans"**: Display a numbered list of plans missing journal entries (format: `N. [YYYY-MM-DD] Title`). Ask the user which numbers they want (comma-separated). Map their selections back to `planDir` values.
+**If "By project"**: Display the unique project labels from the missing plans list. Ask which project(s) to import.
+
+**If "Specific plans"**: Display a numbered list of new plans (format: `N. [YYYY-MM-DD HH:MM AM] [project/name] Title`). Ask the user which numbers they want (comma-separated). Map their selections back to `sourceSlug` values.
 
 ### 4. Ask summarization preference
 
@@ -49,19 +63,22 @@ Use `AskUserQuestion` with these options:
 Execute the script with `--dry-run` and the appropriate filters:
 
 ```bash
-# All plans
-bun hooks/backport-journal.ts --all --dry-run [--skip-summarize]
+# All new plans
+bun hooks/backport-journal.ts --all --dry-run [--skip-summarize] 2>/dev/null
 
 # Date range
-bun hooks/backport-journal.ts --all --from=YYYY-MM-DD --to=YYYY-MM-DD --dry-run [--skip-summarize]
+bun hooks/backport-journal.ts --all --from=YYYY-MM-DD --to=YYYY-MM-DD --dry-run [--skip-summarize] 2>/dev/null
+
+# By project
+bun hooks/backport-journal.ts --all --project=project-name --dry-run [--skip-summarize] 2>/dev/null
 
 # Specific plans
-bun hooks/backport-journal.ts --plans=dir1,dir2,dir3 --dry-run [--skip-summarize]
+bun hooks/backport-journal.ts --plans=slug1,slug2,slug3 --dry-run [--skip-summarize] 2>/dev/null
 ```
 
 Add `--skip-summarize` if the user chose fast text extraction.
 
-Parse the JSON result and display a summary: "Will create N journal entries, M will be skipped (already exist), E errors."
+Parse the JSON result and display a summary: "Will import N plans, M will be skipped (already imported), E errors."
 
 If there are errors, show them to the user.
 
@@ -69,7 +86,7 @@ If there are errors, show them to the user.
 
 Use `AskUserQuestion` to confirm:
 
-- **Proceed** — Create the journal entries
+- **Proceed** — Import the plans and create journal entries
 - **Cancel** — Abort without changes
 
 ### 7. Execute
@@ -77,9 +94,9 @@ Use `AskUserQuestion` to confirm:
 Run the same command without `--dry-run`:
 
 ```bash
-bun hooks/backport-journal.ts --all [--skip-summarize]
+bun hooks/backport-journal.ts --all [--skip-summarize] 2>/dev/null
 ```
 
-Parse the JSON result and display the final report: "Created N journal entries. M skipped. E errors."
+Parse the JSON result and display the final report: "Imported N plans. M skipped. E errors."
 
 If there were errors, list them for the user.

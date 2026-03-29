@@ -1,36 +1,43 @@
 #!/usr/bin/env bun
-// backport-journal.ts — Retroactively create journal entries for existing plans
+// backport-journal.ts — Import plans from ~/.claude/plans/ into Obsidian vault + journal
 // CLI script (not a hook). Run via: bun hooks/backport-journal.ts [options]
 
 import { readdirSync, statSync, existsSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import {
   loadConfig,
   getVaultPath,
   extractTitle,
   parsePlanFrontmatter,
   summarizeWithClaude,
-  formatAmPm,
-  getJournalPathForDate,
   getDatePartsFor,
+  getJournalPathForDate,
+  getProjectName,
+  getProjectLabel,
+  toSlug,
+  stripTitleLine,
+  formatTagsYaml,
+  nextCounter,
+  padCounter,
+  runObsidian,
   appendToJournal,
   mergeTagsOnDailyNote,
   type Config,
-  type PlanFrontmatter,
 } from "./shared.ts";
 
 // ---- Types ----
 
 export interface PlanInfo {
-  planDir: string;        // Relative to vault: Claude/Plans/2026/03-29/001-slug
-  planPath: string;       // planDir + /plan (the note path without .md)
-  title: string;
-  date: string;           // YYYY-MM-DD
-  time: string;           // HH:MM or empty
-  ampmTime: string;       // "2:30 PM" or empty
-  journalPath: string;    // Journal/2026/03-March/29-Sunday
-  tags: string[];
-  hasJournalEntry: boolean;
+  sourceSlug: string;       // e.g., "abundant-juggling-petal"
+  sourcePath: string;       // ~/.claude/plans/abundant-juggling-petal.md
+  title: string;            // First # heading
+  date: string;             // YYYY-MM-DD from file birthtime
+  time: string;             // HH:MM from file birthtime
+  ampmTime: string;         // "2:30 PM"
+  projectCwd: string;       // /Users/k/src/perforce/cto/p4c-backoffice
+  projectLabel: string;     // cto/p4c-backoffice
+  isImported: boolean;      // true if source_slug already in vault
 }
 
 export interface BackportResult {
@@ -51,10 +58,26 @@ interface CliArgs {
   all: boolean;
   from?: string;
   to?: string;
-  plans?: string[];
+  plans?: string[];        // source slugs
+  project?: string;        // project label substring filter
   dryRun: boolean;
   skipSummarize: boolean;
   cwd?: string;
+}
+
+// ---- Injectable paths for testing ----
+
+let PLANS_DIR = join(homedir(), ".claude", "plans");
+let PROJECTS_DIR = join(homedir(), ".claude", "projects");
+
+/** @internal Test-only setter for plans directory */
+export function _setPlansDirForTest(dir: string): void {
+  PLANS_DIR = dir;
+}
+
+/** @internal Test-only setter for projects directory */
+export function _setProjectsDirForTest(dir: string): void {
+  PROJECTS_DIR = dir;
 }
 
 // ---- CLI Argument Parsing ----
@@ -71,150 +94,116 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg.startsWith("--to=")) args.to = arg.slice(5);
     else if (arg.startsWith("--cwd=")) args.cwd = arg.slice(6);
     else if (arg.startsWith("--plans=")) args.plans = arg.slice(8).split(",");
+    else if (arg.startsWith("--project=")) args.project = arg.slice(10);
   }
   return args;
 }
 
-// ---- Plan Discovery ----
+// ---- Slug-to-Project Resolution ----
+
+export function buildSlugProjectMap(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const dir of safeReaddir(PROJECTS_DIR)) {
+    const dirPath = join(PROJECTS_DIR, dir);
+    if (!isDir(dirPath)) continue;
+    for (const file of safeReaddir(dirPath)) {
+      if (!file.endsWith(".jsonl")) continue;
+      try {
+        const content = readFileSync(join(dirPath, file), "utf-8");
+        for (const line of content.split("\n")) {
+          if (!line.includes('"slug"')) continue;
+          try {
+            const entry = JSON.parse(line);
+            if (entry.slug && entry.cwd && !map.has(entry.slug)) {
+              map.set(entry.slug, entry.cwd);
+              break;
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      } catch { /* skip unreadable files */ }
+    }
+  }
+  return map;
+}
+
+// ---- Vault Dedup ----
 
 const PLAN_DIR_PATTERN = /^(\d{3,})-(.+)$/;
 const DATE_DIR_PATTERN = /^(\d{2})-(\d{2})$/;
 const YEAR_DIR_PATTERN = /^\d{4}$/;
+
+export function getImportedSlugs(
+  vaultPath: string,
+  planPathRelative: string,
+): Set<string> {
+  const imported = new Set<string>();
+  const basePath = join(vaultPath, planPathRelative);
+  if (!existsSync(basePath)) return imported;
+
+  for (const yearEntry of safeReaddir(basePath)) {
+    if (!YEAR_DIR_PATTERN.test(yearEntry)) continue;
+    const yearPath = join(basePath, yearEntry);
+    if (!isDir(yearPath)) continue;
+    for (const dateEntry of safeReaddir(yearPath)) {
+      if (!DATE_DIR_PATTERN.test(dateEntry)) continue;
+      const datePath = join(yearPath, dateEntry);
+      if (!isDir(datePath)) continue;
+      for (const planEntry of safeReaddir(datePath)) {
+        if (!PLAN_DIR_PATTERN.test(planEntry)) continue;
+        const planFile = join(datePath, planEntry, "plan.md");
+        try {
+          const content = readFileSync(planFile, "utf-8");
+          const fm = parsePlanFrontmatter(content);
+          if (fm.source_slug) imported.add(fm.source_slug);
+        } catch { /* skip */ }
+      }
+    }
+  }
+  return imported;
+}
+
+// ---- Plan Discovery ----
 
 export function discoverPlans(
   vaultPath: string,
   planPathRelative: string,
   config: Config,
 ): PlanInfo[] {
+  const slugProjectMap = buildSlugProjectMap();
+  const importedSlugs = getImportedSlugs(vaultPath, planPathRelative);
+
   const plans: PlanInfo[] = [];
-  const basePath = join(vaultPath, planPathRelative);
+  for (const file of safeReaddir(PLANS_DIR)) {
+    if (!file.endsWith(".md") || file.includes("-agent-")) continue;
 
-  if (!existsSync(basePath)) return plans;
+    const slug = file.replace(/\.md$/, "");
+    const fullPath = join(PLANS_DIR, file);
 
-  // Walk: <basePath>/<yyyy>/<mm-dd>/<counter-slug>/plan.md
-  for (const yearEntry of safeReaddir(basePath)) {
-    if (!YEAR_DIR_PATTERN.test(yearEntry)) continue;
-    const yearPath = join(basePath, yearEntry);
-    if (!isDir(yearPath)) continue;
+    let content: string;
+    try { content = readFileSync(fullPath, "utf-8"); } catch { continue; }
 
-    for (const dateEntry of safeReaddir(yearPath)) {
-      if (!DATE_DIR_PATTERN.test(dateEntry)) continue;
-      const datePath = join(yearPath, dateEntry);
-      if (!isDir(datePath)) continue;
+    const title = extractTitle(content);
+    const stat = statSync(fullPath);
+    const birthtime = stat.birthtime;
+    const { dateKey, timeStr, ampmTime } = getDatePartsFor(birthtime);
 
-      for (const planEntry of safeReaddir(datePath)) {
-        if (!PLAN_DIR_PATTERN.test(planEntry)) continue;
-        const planDirPath = join(datePath, planEntry);
-        if (!isDir(planDirPath)) continue;
+    const cwd = slugProjectMap.get(slug) || "";
 
-        const planFile = join(planDirPath, "plan.md");
-        if (!existsSync(planFile)) continue;
-
-        const info = parsePlanFile(
-          planFile,
-          planPathRelative,
-          yearEntry,
-          dateEntry,
-          planEntry,
-          vaultPath,
-          config,
-        );
-        if (info) plans.push(info);
-      }
-    }
+    plans.push({
+      sourceSlug: slug,
+      sourcePath: fullPath,
+      title,
+      date: dateKey,
+      time: timeStr,
+      ampmTime,
+      projectCwd: cwd,
+      projectLabel: getProjectLabel(cwd),
+      isImported: importedSlugs.has(slug),
+    });
   }
 
-  plans.sort((a, b) => a.date.localeCompare(b.date) || a.planDir.localeCompare(b.planDir));
+  plans.sort((a, b) => a.date.localeCompare(b.date) || a.sourceSlug.localeCompare(b.sourceSlug));
   return plans;
-}
-
-function parsePlanFile(
-  planFile: string,
-  planPathRelative: string,
-  year: string,
-  dateDir: string,
-  planEntry: string,
-  vaultPath: string,
-  config: Config,
-): PlanInfo | null {
-  let content: string;
-  try {
-    content = readFileSync(planFile, "utf-8");
-  } catch {
-    return null;
-  }
-
-  const planDir = `${planPathRelative}/${year}/${dateDir}/${planEntry}`;
-  const planPath = `${planDir}/plan`;
-  const fm = parsePlanFrontmatter(content);
-
-  // Strip frontmatter before extracting title
-  const bodyContent = content.replace(/^---\n[\s\S]*?\n---\n?/, "");
-  const title = extractTitle(bodyContent);
-
-  // Extract date/time from frontmatter or directory structure
-  let date: string;
-  let time = "";
-  let ampmTime = "";
-  let journalPath: string;
-
-  if (fm.datetime) {
-    // Parse from frontmatter: "2026-03-29T14:30"
-    const [datePart, timePart] = fm.datetime.split("T");
-    date = datePart;
-    if (timePart) {
-      time = timePart;
-      const [hh, mm] = timePart.split(":").map(Number);
-      ampmTime = formatAmPm(hh, mm);
-    }
-  } else {
-    // Fallback: derive from directory path + file mtime
-    const [mm, dd] = dateDir.split("-");
-    date = `${year}-${mm}-${dd}`;
-    try {
-      const stat = statSync(planFile);
-      const mtime = stat.mtime;
-      time = `${String(mtime.getHours()).padStart(2, "0")}:${String(mtime.getMinutes()).padStart(2, "0")}`;
-      ampmTime = formatAmPm(mtime.getHours(), mtime.getMinutes());
-    } catch { /* no time available */ }
-  }
-
-  if (fm.journalPath) {
-    journalPath = fm.journalPath;
-  } else {
-    // Build journal path from date
-    const d = new Date(date + "T12:00:00");
-    journalPath = getJournalPathForDate(config, d);
-  }
-
-  // Check for existing journal entry
-  const hasJournalEntry = checkJournalEntry(vaultPath, journalPath, planPath);
-
-  return {
-    planDir,
-    planPath,
-    title,
-    date,
-    time,
-    ampmTime,
-    journalPath,
-    tags: fm.tags || [],
-    hasJournalEntry,
-  };
-}
-
-export function checkJournalEntry(
-  vaultPath: string,
-  journalPath: string,
-  planPath: string,
-): boolean {
-  const journalFile = join(vaultPath, journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`);
-  try {
-    const content = readFileSync(journalFile, "utf-8");
-    return content.includes(`[[${planPath}`);
-  } catch {
-    return false;
-  }
 }
 
 // ---- Filtering ----
@@ -231,9 +220,13 @@ export function filterPlans(
   if (args.to) {
     filtered = filtered.filter((p) => p.date <= args.to!);
   }
+  if (args.project) {
+    const proj = args.project.toLowerCase();
+    filtered = filtered.filter((p) => p.projectLabel.toLowerCase().includes(proj));
+  }
   if (args.plans) {
-    const planSet = new Set(args.plans);
-    filtered = filtered.filter((p) => planSet.has(p.planDir));
+    const slugSet = new Set(args.plans);
+    filtered = filtered.filter((p) => slugSet.has(p.sourceSlug));
   }
 
   return filtered;
@@ -271,53 +264,79 @@ export async function backportPlans(
   };
 
   for (const plan of plans) {
-    if (plan.hasJournalEntry) {
+    if (plan.isImported) {
       result.skipped++;
       result.details.push({
-        planDir: plan.planDir,
+        planDir: plan.sourceSlug,
         title: plan.title,
         status: "skipped",
-        reason: "Journal entry already exists",
+        reason: "Already imported",
       });
       continue;
     }
 
     try {
-      // Read plan content for summarization
-      const planFile = join(vaultPath, `${plan.planPath}.md`);
-      const content = readFileSync(planFile, "utf-8");
+      const content = readFileSync(plan.sourcePath, "utf-8");
+      const title = plan.title;
+      const slug = toSlug(title);
+      const { dd, mm, yyyy } = getDatePartsFor(new Date(plan.date + "T12:00:00"));
+      const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+      const dateDirAbsolute = join(vaultPath, dateDirRelative);
+      const counter = nextCounter(dateDirAbsolute);
+
+      const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`;
+      const planPath = `${planDir}/plan`;
+
+      const birthtime = new Date(`${plan.date}T${plan.time || "12:00"}`);
+      const journalPath = getJournalPathForDate(config, birthtime);
+      const { datetime } = getDatePartsFor(birthtime);
 
       let summary: string;
       let tags: string;
-
       if (options.skipSummarize) {
         summary = fallbackSummary(content);
-        tags = plan.tags.length > 0 ? plan.tags.join(",") : "claude-session";
+        tags = "claude-session";
       } else {
-        const result = await summarizeWithClaude(content, PLAN_SYSTEM_PROMPT);
-        summary = result.summary;
-        tags = result.tags;
+        const res = await summarizeWithClaude(content, PLAN_SYSTEM_PROMPT);
+        summary = res.summary;
+        tags = res.tags;
       }
 
-      const timeDisplay = plan.ampmTime || "Plan";
-      const journalEntry = `\\n### ${plan.title}\\n\\n| | |\\n|---|---|\\n| [[${plan.planPath}\\|${timeDisplay}]] | ${summary} |`;
+      const project = getProjectName(plan.projectCwd);
+      const tagsYaml = formatTagsYaml(tags);
+
+      const noteContent = `---
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}
+source_slug: ${plan.sourceSlug}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
+---
+# ${title}
+
+${stripTitleLine(content)}
+`;
+
+      const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${plan.ampmTime || "Plan"}]] | ${summary} |`;
 
       if (!options.dryRun) {
-        appendToJournal(journalEntry, plan.journalPath, config.vault);
-        mergeTagsOnDailyNote(tags, plan.journalPath, config.vault);
+        const escapedContent = noteContent.replace(/\n/g, "\\n");
+        runObsidian(
+          ["create", `path=${planPath}`, `content=${escapedContent}`, "silent"],
+          config.vault,
+        );
+        appendToJournal(journalEntry, journalPath, config.vault);
+        mergeTagsOnDailyNote(tags, journalPath, config.vault);
       }
 
       result.created++;
       result.details.push({
-        planDir: plan.planDir,
+        planDir: plan.sourceSlug,
         title: plan.title,
         status: "created",
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      result.errors.push(`${plan.planDir}: ${msg}`);
+      result.errors.push(`${plan.sourceSlug}: ${msg}`);
       result.details.push({
-        planDir: plan.planDir,
+        planDir: plan.sourceSlug,
         title: plan.title,
         status: "error",
         reason: msg,
@@ -366,8 +385,8 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  if (!args.all && !args.from && !args.to && !args.plans) {
-    console.error(JSON.stringify({ error: "Specify --all, --from/--to, or --plans to select plans for backport." }));
+  if (!args.all && !args.from && !args.to && !args.plans && !args.project) {
+    console.error(JSON.stringify({ error: "Specify --all, --from/--to, --project, or --plans to select plans for import." }));
     process.exit(1);
   }
 
