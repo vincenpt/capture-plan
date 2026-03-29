@@ -7,3 +7,4 @@ node_modules/
 !.claude/
 .claude/plans/
 .claude/image-cache/
+/.orphaned_at
