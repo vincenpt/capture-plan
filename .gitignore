@@ -2,7 +2,8 @@ hooks/state/
 *.log
 node_modules/
 
-# Override global gitignore to include project skills
+# Override global gitignore to include project files
+!CLAUDE.md
 !.claude/
 .claude/plans/
 .claude/image-cache/
