@@ -45,6 +45,7 @@ interface StopPayload {
 }
 
 async function main(): Promise<void> {
+  console.error("[capture-done] hook invoked");
   try {
     const input = await Bun.stdin.text();
     debugLog(`=== STOP ${new Date().toISOString()} ===\n${input}\n---\n`, DEBUG_LOG);
@@ -191,6 +192,8 @@ ${doneText}
     console.error(`Done summary captured -> ${summaryPath}.md`);
     debugLog(`Summary captured for ${state.plan_title}\n`, DEBUG_LOG);
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[capture-done] Fatal error: ${msg}`);
     debugLog(`Fatal error: ${err}\n`, DEBUG_LOG);
   }
 

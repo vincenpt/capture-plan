@@ -1,9 +1,40 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import * as shared from "../shared.ts";
 import { _setStateDirForTest } from "../shared.ts";
+
+// ---- hooks.json structural validation ----
+
+describe("hooks.json", () => {
+  const hooksDir = join(dirname(dirname(import.meta.path)));
+  const hooksJsonPath = join(hooksDir, "hooks.json");
+
+  it("exists alongside the hook scripts", () => {
+    const content = readFileSync(hooksJsonPath, "utf8");
+    expect(content.length).toBeGreaterThan(0);
+  });
+
+  it("contains valid JSON with expected hook events", () => {
+    const content = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
+    expect(content.hooks).toBeDefined();
+    expect(content.hooks.PostToolUse).toBeArrayOfSize(1);
+    expect(content.hooks.PostToolUse[0].matcher).toBe("ExitPlanMode");
+    expect(content.hooks.Stop).toBeArrayOfSize(1);
+  });
+
+  it("hook commands reference CLAUDE_PLUGIN_ROOT", () => {
+    const content = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
+    for (const event of Object.values(content.hooks) as any[]) {
+      for (const entry of event) {
+        for (const hook of entry.hooks) {
+          expect(hook.command).toContain("${CLAUDE_PLUGIN_ROOT}");
+        }
+      }
+    }
+  });
+});
 
 let tempDir: string;
 let originalStateDir: string;

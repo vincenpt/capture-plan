@@ -69,6 +69,7 @@ async function extractPlanContent(
 }
 
 async function main(): Promise<void> {
+  console.error("[capture-plan] hook invoked");
   try {
     const input = await Bun.stdin.text();
     debugLog(`=== ${new Date().toISOString()} ===\n${input}\n---\n`, DEBUG_LOG);
@@ -151,6 +152,8 @@ ${stripTitleLine(planContent)}
     console.log(`Plan captured -> ${planPath}.md`);
     debugLog(`State written for session ${sessionId}\n`, DEBUG_LOG);
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[capture-plan] Fatal error: ${msg}`);
     debugLog(`Fatal error: ${err}\n`, DEBUG_LOG);
   }
 
