@@ -98,9 +98,9 @@ After installation, confirm the hooks are active:
 
 The plugin ships with a default config. Override settings at any of these locations (highest priority wins):
 
-1. **Project local**: `$PROJECT/.claude/capture-plan.config.toml`
+1. **Project local**: `$PROJECT/.claude/capture-plan.toml`
 2. **User global**: `~/.config/capture-plan/config.toml`
-3. **Plugin default**: `capture-plan.config.toml` (shipped with plugin)
+3. **Plugin default**: `capture-plan.toml` (shipped with plugin)
 
 ### Config options
 

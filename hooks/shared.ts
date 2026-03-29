@@ -34,7 +34,7 @@ export let STATE_DIR = join(HOOKS_DIR, "state");
 export function _setStateDirForTest(dir: string): void {
   STATE_DIR = dir;
 }
-const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.config.toml");
+const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.toml");
 const USER_GLOBAL_CONFIG = join(homedir(), ".config", "capture-plan", "config.toml");
 
 const DEFAULT_CONFIG: Config = {
@@ -64,7 +64,7 @@ async function loadToml(path: string): Promise<Record<string, unknown> | null> {
 export async function loadConfig(cwd?: string): Promise<Config> {
   const pluginDefault = await loadToml(PLUGIN_DEFAULT_CONFIG);
   const userGlobal = await loadToml(USER_GLOBAL_CONFIG);
-  const projectPath = cwd ? join(cwd, ".claude", "capture-plan.config.toml") : null;
+  const projectPath = cwd ? join(cwd, ".claude", "capture-plan.toml") : null;
   const project = projectPath ? await loadToml(projectPath) : null;
   const merged = { ...pluginDefault, ...userGlobal, ...project };
   return {
