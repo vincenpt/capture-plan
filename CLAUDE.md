@@ -12,13 +12,16 @@ A Claude Code plugin that captures plans and execution summaries to an Obsidian 
 ## Commands
 
 ```bash
-bun test                              # Run all tests (116 tests across 4 files)
+bun test                              # Run all tests (181 tests across 5 files)
 bun test capture-done.test.ts         # Run a single test file
 bun test --grep "pattern"             # Run tests matching a pattern
 bun test --watch                      # Watch mode
+bun run lint                          # Lint with Biome (errors only)
+bun run check                         # Lint + format check
+bun run check:fix                     # Auto-fix lint + format issues
 ```
 
-No build step — Bun runs TypeScript natively.
+No build step — Bun runs TypeScript natively. Biome handles linting and formatting (`biome.json`).
 
 ## Architecture
 

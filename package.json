@@ -4,9 +4,15 @@
   "private": true,
   "scripts": {
     "test": "bun test",
-    "test:watch": "bun test --watch"
+    "test:watch": "bun test --watch",
+    "lint": "bunx biome lint hooks/",
+    "lint:fix": "bunx biome lint --fix hooks/",
+    "format": "bunx biome format --write hooks/",
+    "check": "bunx biome check hooks/",
+    "check:fix": "bunx biome check --fix hooks/"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.9",
     "@types/bun": "^1.3.11",
     "typescript": "^6.0.2"
   }

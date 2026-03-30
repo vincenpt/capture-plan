@@ -4,30 +4,28 @@
 
 import { join } from "node:path";
 import {
+  appendRowToJournalSection,
+  appendToJournal,
   debugLog,
-  loadConfig,
-  runObsidian,
-  summarizeWithClaude,
-  mergeTags,
-  mergeTagsOnDailyNote,
+  deleteSessionState,
+  findTranscriptPath,
+  formatTagsYaml,
   getDateParts,
   getJournalPath,
   getProjectName,
-  formatTagsYaml,
-  appendToJournal,
-  appendRowToJournalSection,
   getVaultPath,
+  loadConfig,
+  mergeTags,
+  mergeTagsOnDailyNote,
   readSessionState,
-  deleteSessionState,
-  findTranscriptPath,
+  runObsidian,
+  summarizeWithClaude,
 } from "./shared.ts";
 import {
-  parseTranscript,
+  extractLastAssistantText,
   findExitPlanIndex,
   hasExecutionAfter,
-  extractLastAssistantText,
-  type TranscriptEntry,
-  type ContentBlock,
+  parseTranscript,
 } from "./transcript.ts";
 
 const DEBUG_LOG = "/tmp/capture-done-debug.log";
@@ -115,20 +113,22 @@ async function main(): Promise<void> {
     debugLog(`Done text extracted (${doneText.length} chars)\n`, DEBUG_LOG);
 
     // Summarize with Haiku
-    const { summary, tags: newTags } = await summarizeWithClaude(
-      doneText,
-      DONE_SYSTEM_PROMPT,
-    );
+    const { summary, tags: newTags } = await summarizeWithClaude(doneText, DONE_SYSTEM_PROMPT);
 
     // Build the summary note
     const config = await loadConfig(payload.cwd);
-    const { dd, mm, yyyy, datetime, timeStr, ampmTime } = getDateParts();
+    const { datetime, ampmTime } = getDateParts();
     const journalPath = getJournalPath(config);
 
     const summaryPath = `${state.plan_dir}/summary`;
 
     const project = state.project || getProjectName(payload.cwd);
-    const planTags = state.tags ? state.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+    const planTags = state.tags
+      ? state.tags
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : [];
     const combinedTagsCsv = mergeTags(planTags, newTags);
     const tagsYaml = formatTagsYaml(combinedTagsCsv);
 
@@ -170,11 +170,7 @@ ${doneText}
         ? journalToModify
         : `${journalToModify}.md`;
       const fullJournalPath = join(vaultPath, journalFile);
-      appended = await appendRowToJournalSection(
-        state.plan_title,
-        tableRow,
-        fullJournalPath,
-      );
+      appended = await appendRowToJournalSection(state.plan_title, tableRow, fullJournalPath);
       debugLog(`appendRowToJournalSection: ${appended}\n`, DEBUG_LOG);
     }
 

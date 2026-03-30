@@ -22,13 +22,7 @@ export interface TranscriptEntry {
 
 // ---- Constants ----
 
-export const EXECUTION_TOOLS = new Set([
-  "Edit",
-  "Write",
-  "Bash",
-  "NotebookEdit",
-  "MultiEdit",
-]);
+export const EXECUTION_TOOLS = new Set(["Edit", "Write", "Bash", "NotebookEdit", "MultiEdit"]);
 
 // ---- Functions ----
 
@@ -46,7 +40,9 @@ export function parseTranscript(transcriptPath: string): TranscriptEntry[] {
     if (!line.trim()) continue;
     try {
       entries.push(JSON.parse(line));
-    } catch { /* skip malformed */ }
+    } catch {
+      /* skip malformed */
+    }
   }
   return entries;
 }
@@ -67,7 +63,7 @@ export function findExitPlanIndex(entries: TranscriptEntry[]): number {
 export function hasExecutionAfter(entries: TranscriptEntry[], afterIdx: number): boolean {
   for (let i = afterIdx + 1; i < entries.length; i++) {
     for (const block of getContentBlocks(entries[i])) {
-      if (block.type === "tool_use" && EXECUTION_TOOLS.has(block.name!)) {
+      if (block.type === "tool_use" && block.name && EXECUTION_TOOLS.has(block.name)) {
         return true;
       }
     }
@@ -75,10 +71,7 @@ export function hasExecutionAfter(entries: TranscriptEntry[], afterIdx: number):
   return false;
 }
 
-export function extractLastAssistantText(
-  entries: TranscriptEntry[],
-  afterIdx: number,
-): string {
+export function extractLastAssistantText(entries: TranscriptEntry[], afterIdx: number): string {
   // Walk backwards from end, find last assistant text block
   for (let i = entries.length - 1; i > afterIdx; i--) {
     const blocks = getContentBlocks(entries[i]);

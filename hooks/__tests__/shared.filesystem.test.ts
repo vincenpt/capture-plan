@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import * as shared from "../shared.ts";
 import { _setStateDirForTest } from "../shared.ts";
 
@@ -26,9 +26,10 @@ describe("hooks.json", () => {
 
   it("hook commands reference CLAUDE_PLUGIN_ROOT", () => {
     const content = JSON.parse(readFileSync(hooksJsonPath, "utf8"));
-    for (const event of Object.values(content.hooks) as any[]) {
+    for (const event of Object.values(content.hooks) as { hooks: { command: string }[] }[]) {
       for (const entry of event) {
         for (const hook of entry.hooks) {
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: testing for shell variable literal
           expect(hook.command).toContain("${CLAUDE_PLUGIN_ROOT}");
         }
       }
@@ -40,10 +41,7 @@ let tempDir: string;
 let originalStateDir: string;
 
 beforeEach(() => {
-  tempDir = join(
-    tmpdir(),
-    `cp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  );
+  tempDir = join(tmpdir(), `cp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(tempDir, { recursive: true });
   originalStateDir = shared.STATE_DIR;
   _setStateDirForTest(tempDir);
@@ -127,22 +125,24 @@ describe("session state", () => {
   it("preserves all fields", async () => {
     await shared.writeSessionState("test-session-123", testState);
     const read = await shared.readSessionState("test-session-123");
-    expect(read!.session_id).toBe("test-session-123");
-    expect(read!.plan_slug).toBe("my-plan");
-    expect(read!.plan_title).toBe("My Plan");
-    expect(read!.plan_dir).toBe("Claude/Plans/2026/03-29/001-my-plan");
-    expect(read!.date_key).toBe("2026-03-29");
-    expect(read!.timestamp).toBe("2026-03-29T10:00:00.000Z");
-    expect(read!.journal_path).toBe("Journal/2026/03-March/29-Saturday");
-    expect(read!.project).toBe("my-project");
-    expect(read!.tags).toBe("plugin-dev, hooks");
+    expect(read).not.toBeNull();
+    expect(read?.session_id).toBe("test-session-123");
+    expect(read?.plan_slug).toBe("my-plan");
+    expect(read?.plan_title).toBe("My Plan");
+    expect(read?.plan_dir).toBe("Claude/Plans/2026/03-29/001-my-plan");
+    expect(read?.date_key).toBe("2026-03-29");
+    expect(read?.timestamp).toBe("2026-03-29T10:00:00.000Z");
+    expect(read?.journal_path).toBe("Journal/2026/03-March/29-Saturday");
+    expect(read?.project).toBe("my-project");
+    expect(read?.tags).toBe("plugin-dev, hooks");
   });
 
   it("handles state without optional journal_path", async () => {
     const stateNoJournal = { ...testState, journal_path: undefined };
     await shared.writeSessionState("no-journal", stateNoJournal);
     const read = await shared.readSessionState("no-journal");
-    expect(read!.journal_path).toBeUndefined();
+    expect(read).not.toBeNull();
+    expect(read?.journal_path).toBeUndefined();
   });
 });
 
@@ -190,11 +190,7 @@ describe("appendRowToJournalSection", () => {
     const journalFile = join(tempDir, "journal.md");
     await Bun.write(journalFile, "## Other Content\n\nSome text\n");
 
-    const result = await shared.appendRowToJournalSection(
-      "Missing Plan",
-      "| row |",
-      journalFile,
-    );
+    const result = await shared.appendRowToJournalSection("Missing Plan", "| row |", journalFile);
     expect(result).toBe(false);
   });
 
@@ -202,11 +198,7 @@ describe("appendRowToJournalSection", () => {
     const journalFile = join(tempDir, "journal.md");
     await Bun.write(journalFile, "### My Plan\n\nJust text, no table.\n");
 
-    const result = await shared.appendRowToJournalSection(
-      "My Plan",
-      "| row |",
-      journalFile,
-    );
+    const result = await shared.appendRowToJournalSection("My Plan", "| row |", journalFile);
     expect(result).toBe(false);
   });
 
@@ -240,9 +232,7 @@ describe("appendRowToJournalSection", () => {
 
     const content = await Bun.file(journalFile).text();
     expect(content).toContain("Second entry");
-    expect(content.indexOf("Second entry")).toBeGreaterThan(
-      content.indexOf("First entry"),
-    );
+    expect(content.indexOf("Second entry")).toBeGreaterThan(content.indexOf("First entry"));
   });
 
   it("skips table separator rows when finding last table row", async () => {

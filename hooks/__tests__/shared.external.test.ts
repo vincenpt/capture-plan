@@ -1,11 +1,35 @@
-import { describe, it, expect, spyOn, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import {
-  runObsidian,
-  getVaultPath,
-  summarizeWithClaude,
   appendToJournal,
+  getVaultPath,
   mergeTagsOnDailyNote,
+  runObsidian,
+  summarizeWithClaude,
 } from "../shared.ts";
+
+// ---- Type-safe mock helpers for Bun process APIs ----
+
+type SpawnSyncResult = ReturnType<typeof Bun.spawnSync>;
+type SpawnResult = ReturnType<typeof Bun.spawn>;
+
+function spawnSyncResult(overrides: {
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  success?: boolean;
+}): SpawnSyncResult {
+  return {
+    stdout: Buffer.from(overrides.stdout ?? ""),
+    stderr: Buffer.from(overrides.stderr ?? ""),
+    exitCode: overrides.exitCode ?? 0,
+    success: overrides.success ?? true,
+  } as SpawnSyncResult;
+}
+
+interface SpawnSyncCall {
+  cmd: string[];
+  opts: unknown;
+}
 
 // ---- runObsidian ----
 
@@ -17,28 +41,18 @@ describe("runObsidian", () => {
   });
 
   it("calls obsidian without vault", () => {
-    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
-      stdout: Buffer.from("ok"),
-      stderr: Buffer.from(""),
-      exitCode: 0,
-      success: true,
-    } as any);
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({ stdout: "ok" }));
 
     const result = runObsidian(["create", "path=test"]);
     expect(result).toEqual({ stdout: "ok", exitCode: 0 });
-    expect(spawnSyncSpy).toHaveBeenCalledWith(
-      ["obsidian", "create", "path=test"],
-      { stdout: "pipe", stderr: "pipe" },
-    );
+    expect(spawnSyncSpy).toHaveBeenCalledWith(["obsidian", "create", "path=test"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
   });
 
   it("calls obsidian with vault", () => {
-    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
-      stdout: Buffer.from("ok"),
-      stderr: Buffer.from(""),
-      exitCode: 0,
-      success: true,
-    } as any);
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({ stdout: "ok" }));
 
     const result = runObsidian(["create", "path=test"], "MyVault");
     expect(result).toEqual({ stdout: "ok", exitCode: 0 });
@@ -49,12 +63,9 @@ describe("runObsidian", () => {
   });
 
   it("trims stdout whitespace", () => {
-    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
-      stdout: Buffer.from("  trimmed  \n"),
-      stderr: Buffer.from(""),
-      exitCode: 0,
-      success: true,
-    } as any);
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: "  trimmed  \n" }),
+    );
 
     const result = runObsidian(["test"]);
     expect(result.stdout).toBe("trimmed");
@@ -80,49 +91,35 @@ describe("getVaultPath", () => {
   });
 
   it("returns path on success", () => {
-    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
-      stdout: Buffer.from("/path/to/vault\n"),
-      stderr: Buffer.from(""),
-      exitCode: 0,
-      success: true,
-    } as any);
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: "/path/to/vault\n" }),
+    );
 
     expect(getVaultPath()).toBe("/path/to/vault");
   });
 
   it("includes vault parameter when provided", () => {
-    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
-      stdout: Buffer.from("/path/to/vault"),
-      stderr: Buffer.from(""),
-      exitCode: 0,
-      success: true,
-    } as any);
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: "/path/to/vault" }),
+    );
 
     getVaultPath("MyVault");
-    expect(spawnSyncSpy).toHaveBeenCalledWith(
-      ["obsidian", "vault=MyVault", "vault", "info=path"],
-      { stdout: "pipe", stderr: "pipe" },
-    );
+    expect(spawnSyncSpy).toHaveBeenCalledWith(["obsidian", "vault=MyVault", "vault", "info=path"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
   });
 
   it("returns null on non-zero exit code", () => {
-    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
-      stdout: Buffer.from(""),
-      stderr: Buffer.from("error"),
-      exitCode: 1,
-      success: false,
-    } as any);
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stderr: "error", exitCode: 1, success: false }),
+    );
 
     expect(getVaultPath()).toBeNull();
   });
 
   it("returns null on empty stdout", () => {
-    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
-      stdout: Buffer.from(""),
-      stderr: Buffer.from(""),
-      exitCode: 0,
-      success: true,
-    } as any);
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({}));
 
     expect(getVaultPath()).toBeNull();
   });
@@ -153,10 +150,14 @@ describe("summarizeWithClaude", () => {
           controller.close();
         },
       }),
-      stderr: new ReadableStream({ start(c) { c.close(); } }),
+      stderr: new ReadableStream({
+        start(c) {
+          c.close();
+        },
+      }),
       exited: Promise.resolve(exitCode),
       pid: 1234,
-    } as any);
+    } as SpawnResult);
   }
 
   it("parses successful 2-line output", async () => {
@@ -174,9 +175,7 @@ describe("summarizeWithClaude", () => {
       "Some plan content here for fallback testing",
       "system prompt",
     );
-    expect(result.summary).toBe(
-      "Some plan content here for fallback testing",
-    );
+    expect(result.summary).toBe("Some plan content here for fallback testing");
     expect(result.tags).toBe("claude-session");
   });
 
@@ -236,22 +235,14 @@ describe("summarizeWithClaude", () => {
 
 describe("appendToJournal", () => {
   let spawnSyncSpy: ReturnType<typeof spyOn>;
-  let calls: { cmd: string[]; opts: any }[];
+  let calls: SpawnSyncCall[];
 
   beforeEach(() => {
     calls = [];
-    spawnSyncSpy = spyOn(Bun, "spawnSync").mockImplementation(
-      ((cmd: any, opts: any) => {
-        calls.push({ cmd: [...cmd], opts });
-        // First call succeeds by default
-        return {
-          stdout: Buffer.from(""),
-          stderr: Buffer.from(""),
-          exitCode: 0,
-          success: true,
-        } as any;
-      }) as any,
-    );
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockImplementation(((cmd: string[], opts?: unknown) => {
+      calls.push({ cmd: [...cmd], opts });
+      return spawnSyncResult({});
+    }) as typeof Bun.spawnSync);
   });
 
   afterEach(() => {
@@ -267,17 +258,15 @@ describe("appendToJournal", () => {
 
   it("creates then retries append on first failure", () => {
     let callCount = 0;
-    spawnSyncSpy.mockImplementation((cmd: any, opts: any) => {
+    spawnSyncSpy.mockImplementation(((cmd: string[], opts?: unknown) => {
       calls.push({ cmd: [...cmd], opts });
       callCount++;
       // First call (append) fails, rest succeed
-      return {
-        stdout: Buffer.from(""),
-        stderr: Buffer.from(""),
+      return spawnSyncResult({
         exitCode: callCount === 1 ? 1 : 0,
         success: callCount !== 1,
-      } as any;
-    });
+      });
+    }) as typeof Bun.spawnSync);
 
     appendToJournal("content", "Journal/2026/03/29.md");
     // Three calls: append (fail), create, append (retry)
@@ -317,38 +306,21 @@ describe("mergeTagsOnDailyNote", () => {
   });
 
   it("returns early on empty journalPath", () => {
-    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
-      stdout: Buffer.from(""),
-      stderr: Buffer.from(""),
-      exitCode: 0,
-      success: true,
-    } as any);
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({}));
 
     mergeTagsOnDailyNote("tag1", "", "vault");
     expect(spawnSyncSpy).not.toHaveBeenCalled();
   });
 
   it("calls property:read then property:set", () => {
-    spawnSyncSpy = spyOn(Bun, "spawnSync").mockImplementation(
-      ((cmd: any, _opts: any) => {
-        calls.push([...cmd]);
-        // property:read returns existing tags
-        if (cmd.includes("property:read")) {
-          return {
-            stdout: Buffer.from("existing-tag\n"),
-            stderr: Buffer.from(""),
-            exitCode: 0,
-            success: true,
-          } as any;
-        }
-        return {
-          stdout: Buffer.from(""),
-          stderr: Buffer.from(""),
-          exitCode: 0,
-          success: true,
-        } as any;
-      }) as any,
-    );
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockImplementation(((cmd: string[]) => {
+      calls.push([...cmd]);
+      // property:read returns existing tags
+      if (cmd.includes("property:read")) {
+        return spawnSyncResult({ stdout: "existing-tag\n" });
+      }
+      return spawnSyncResult({});
+    }) as typeof Bun.spawnSync);
 
     mergeTagsOnDailyNote("new-tag", "Journal/2026/03/29", "vault");
 
@@ -361,16 +333,11 @@ describe("mergeTagsOnDailyNote", () => {
   });
 
   it("appends .md extension to journal path", () => {
-    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue({
-      stdout: Buffer.from(""),
-      stderr: Buffer.from(""),
-      exitCode: 0,
-      success: true,
-    } as any);
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({}));
 
     mergeTagsOnDailyNote("tag", "Journal/path", "vault");
-    const readCall = (spawnSyncSpy.mock.calls[0] as any[])[0];
-    const pathArg = readCall.find((a: string) => a.startsWith("path="));
+    const readCall = spawnSyncSpy.mock.calls[0][0] as string[];
+    const pathArg = readCall.find((a) => a.startsWith("path="));
     expect(pathArg).toBe("path=Journal/path.md");
   });
 });

@@ -1,17 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  discoverPlans,
-  filterPlans,
-  backportPlans,
-  buildSlugProjectMap,
-  getImportedSlugs,
-  parseArgs,
   _setPlansDirForTest,
   _setProjectsDirForTest,
+  backportPlans,
+  buildSlugProjectMap,
+  discoverPlans,
+  filterPlans,
+  getImportedSlugs,
   type PlanInfo,
+  parseArgs,
 } from "../backport-journal.ts";
 import type { Config } from "../shared.ts";
 
@@ -34,7 +34,10 @@ function makePlanFile(slug: string, content: string): string {
   return filePath;
 }
 
-function makeSessionJsonl(projectSlug: string, entries: Array<{ slug: string; cwd: string }>): void {
+function makeSessionJsonl(
+  projectSlug: string,
+  entries: Array<{ slug: string; cwd: string }>,
+): void {
   const dirPath = join(projectsDir, projectSlug);
   mkdirSync(dirPath, { recursive: true });
   const sessionId = `test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -73,10 +76,7 @@ Plan body for ${opts.title}.
 }
 
 beforeEach(() => {
-  tempDir = join(
-    tmpdir(),
-    `bp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  );
+  tempDir = join(tmpdir(), `bp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   vaultPath = join(tempDir, "vault");
   plansDir = join(tempDir, "plans");
   projectsDir = join(tempDir, "projects");
@@ -175,12 +175,8 @@ describe("buildSlugProjectMap", () => {
   });
 
   it("first match wins (does not overwrite)", () => {
-    makeSessionJsonl("-project-1", [
-      { slug: "same-slug", cwd: "/first/cwd" },
-    ]);
-    makeSessionJsonl("-project-2", [
-      { slug: "same-slug", cwd: "/second/cwd" },
-    ]);
+    makeSessionJsonl("-project-1", [{ slug: "same-slug", cwd: "/first/cwd" }]);
+    makeSessionJsonl("-project-2", [{ slug: "same-slug", cwd: "/second/cwd" }]);
 
     const map = buildSlugProjectMap();
     // Should have one of the two (first found)
@@ -389,7 +385,10 @@ describe("filterPlans", () => {
 
   it("filters by --from date", () => {
     const filtered = filterPlans(plans, {
-      list: false, all: false, dryRun: false, skipSummarize: false,
+      list: false,
+      all: false,
+      dryRun: false,
+      skipSummarize: false,
       from: "2026-03-01",
     });
     expect(filtered).toHaveLength(2);
@@ -399,7 +398,10 @@ describe("filterPlans", () => {
 
   it("filters by --to date", () => {
     const filtered = filterPlans(plans, {
-      list: false, all: false, dryRun: false, skipSummarize: false,
+      list: false,
+      all: false,
+      dryRun: false,
+      skipSummarize: false,
       to: "2026-03-31",
     });
     expect(filtered).toHaveLength(2);
@@ -409,8 +411,12 @@ describe("filterPlans", () => {
 
   it("filters by date range", () => {
     const filtered = filterPlans(plans, {
-      list: false, all: false, dryRun: false, skipSummarize: false,
-      from: "2026-02-01", to: "2026-04-30",
+      list: false,
+      all: false,
+      dryRun: false,
+      skipSummarize: false,
+      from: "2026-02-01",
+      to: "2026-04-30",
     });
     expect(filtered).toHaveLength(1);
     expect(filtered[0].title).toBe("Mar Plan");
@@ -418,7 +424,10 @@ describe("filterPlans", () => {
 
   it("filters by project label", () => {
     const filtered = filterPlans(plans, {
-      list: false, all: false, dryRun: false, skipSummarize: false,
+      list: false,
+      all: false,
+      dryRun: false,
+      skipSummarize: false,
       project: "project-a",
     });
     expect(filtered).toHaveLength(2);
@@ -428,7 +437,10 @@ describe("filterPlans", () => {
 
   it("filters by project label case-insensitively", () => {
     const filtered = filterPlans(plans, {
-      list: false, all: false, dryRun: false, skipSummarize: false,
+      list: false,
+      all: false,
+      dryRun: false,
+      skipSummarize: false,
       project: "Project-A",
     });
     expect(filtered).toHaveLength(2);
@@ -436,7 +448,10 @@ describe("filterPlans", () => {
 
   it("filters by specific plan slugs", () => {
     const filtered = filterPlans(plans, {
-      list: false, all: false, dryRun: false, skipSummarize: false,
+      list: false,
+      all: false,
+      dryRun: false,
+      skipSummarize: false,
       plans: ["jan-plan", "jun-plan"],
     });
     expect(filtered).toHaveLength(2);
@@ -446,7 +461,10 @@ describe("filterPlans", () => {
 
   it("returns all when no filters specified", () => {
     const filtered = filterPlans(plans, {
-      list: false, all: false, dryRun: false, skipSummarize: false,
+      list: false,
+      all: false,
+      dryRun: false,
+      skipSummarize: false,
     });
     expect(filtered).toHaveLength(3);
   });
@@ -458,17 +476,19 @@ describe("backportPlans", () => {
   it("skips plans that are already imported", async () => {
     makePlanFile("imported-plan", "# Imported Plan\n\nContent.");
 
-    const plans: PlanInfo[] = [{
-      sourceSlug: "imported-plan",
-      sourcePath: join(plansDir, "imported-plan.md"),
-      title: "Imported Plan",
-      date: "2026-03-29",
-      time: "14:30",
-      ampmTime: "2:30 PM",
-      projectCwd: "/Users/k/src/project",
-      projectLabel: "src/project",
-      isImported: true,
-    }];
+    const plans: PlanInfo[] = [
+      {
+        sourceSlug: "imported-plan",
+        sourcePath: join(plansDir, "imported-plan.md"),
+        title: "Imported Plan",
+        date: "2026-03-29",
+        time: "14:30",
+        ampmTime: "2:30 PM",
+        projectCwd: "/Users/k/src/project",
+        projectLabel: "src/project",
+        isImported: true,
+      },
+    ];
 
     const result = await backportPlans(plans, vaultPath, TEST_CONFIG, {
       dryRun: true,
@@ -485,17 +505,19 @@ describe("backportPlans", () => {
   it("counts plans to create in dry-run mode", async () => {
     makePlanFile("new-plan", "# New Plan\n\nSome content for summarization.");
 
-    const plans: PlanInfo[] = [{
-      sourceSlug: "new-plan",
-      sourcePath: join(plansDir, "new-plan.md"),
-      title: "New Plan",
-      date: "2026-03-29",
-      time: "14:30",
-      ampmTime: "2:30 PM",
-      projectCwd: "/Users/k/src/project",
-      projectLabel: "src/project",
-      isImported: false,
-    }];
+    const plans: PlanInfo[] = [
+      {
+        sourceSlug: "new-plan",
+        sourcePath: join(plansDir, "new-plan.md"),
+        title: "New Plan",
+        date: "2026-03-29",
+        time: "14:30",
+        ampmTime: "2:30 PM",
+        projectCwd: "/Users/k/src/project",
+        projectLabel: "src/project",
+        isImported: false,
+      },
+    ];
 
     const result = await backportPlans(plans, vaultPath, TEST_CONFIG, {
       dryRun: true,
@@ -550,17 +572,19 @@ describe("backportPlans", () => {
   it("reports correct detail fields", async () => {
     makePlanFile("detail-test", "# Detail Test\n\nVerifying detail output.");
 
-    const plans: PlanInfo[] = [{
-      sourceSlug: "detail-test",
-      sourcePath: join(plansDir, "detail-test.md"),
-      title: "Detail Test",
-      date: "2026-03-29",
-      time: "14:30",
-      ampmTime: "2:30 PM",
-      projectCwd: "/Users/k/src/project",
-      projectLabel: "src/project",
-      isImported: false,
-    }];
+    const plans: PlanInfo[] = [
+      {
+        sourceSlug: "detail-test",
+        sourcePath: join(plansDir, "detail-test.md"),
+        title: "Detail Test",
+        date: "2026-03-29",
+        time: "14:30",
+        ampmTime: "2:30 PM",
+        projectCwd: "/Users/k/src/project",
+        projectLabel: "src/project",
+        isImported: false,
+      },
+    ];
 
     const result = await backportPlans(plans, vaultPath, TEST_CONFIG, {
       dryRun: true,
@@ -575,17 +599,19 @@ describe("backportPlans", () => {
   });
 
   it("handles read errors gracefully", async () => {
-    const plans: PlanInfo[] = [{
-      sourceSlug: "missing-plan",
-      sourcePath: join(plansDir, "nonexistent.md"),
-      title: "Missing Plan",
-      date: "2026-03-29",
-      time: "14:30",
-      ampmTime: "2:30 PM",
-      projectCwd: "",
-      projectLabel: "unknown",
-      isImported: false,
-    }];
+    const plans: PlanInfo[] = [
+      {
+        sourceSlug: "missing-plan",
+        sourcePath: join(plansDir, "nonexistent.md"),
+        title: "Missing Plan",
+        date: "2026-03-29",
+        time: "14:30",
+        ampmTime: "2:30 PM",
+        projectCwd: "",
+        projectLabel: "unknown",
+        isImported: false,
+      },
+    ];
 
     const result = await backportPlans(plans, vaultPath, TEST_CONFIG, {
       dryRun: true,

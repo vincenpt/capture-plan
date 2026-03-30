@@ -1,17 +1,17 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   extractTitle,
-  toSlug,
-  stripTitleLine,
   formatAmPm,
-  mergeTags,
-  padCounter,
-  parsePlanFrontmatter,
+  formatTagsYaml,
   getDatePartsFor,
   getJournalPathForDate,
   getProjectName,
-  formatTagsYaml,
+  mergeTags,
+  padCounter,
+  parsePlanFrontmatter,
   shortSessionId,
+  stripTitleLine,
+  toSlug,
 } from "../shared.ts";
 
 // ---- extractTitle ----
@@ -451,24 +451,18 @@ describe("getJournalPathForDate", () => {
   it("builds correct path for a known date", () => {
     // March 29, 2026 is a Sunday
     const date = new Date(2026, 2, 29, 14, 30);
-    expect(getJournalPathForDate(config, date)).toBe(
-      "Journal/2026/03-March/29-Sunday",
-    );
+    expect(getJournalPathForDate(config, date)).toBe("Journal/2026/03-March/29-Sunday");
   });
 
   it("builds correct path for January 1", () => {
     // Jan 1, 2026 is a Thursday
     const date = new Date(2026, 0, 1, 12, 0);
-    expect(getJournalPathForDate(config, date)).toBe(
-      "Journal/2026/01-January/01-Thursday",
-    );
+    expect(getJournalPathForDate(config, date)).toBe("Journal/2026/01-January/01-Thursday");
   });
 
   it("uses custom journal_path from config", () => {
     const customConfig = { plan_path: "Claude/Plans", journal_path: "MyJournal" };
     const date = new Date(2026, 2, 29, 14, 30);
-    expect(getJournalPathForDate(customConfig, date)).toBe(
-      "MyJournal/2026/03-March/29-Sunday",
-    );
+    expect(getJournalPathForDate(customConfig, date)).toBe("MyJournal/2026/03-March/29-Sunday");
   });
 });

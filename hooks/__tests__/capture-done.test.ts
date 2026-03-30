@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  getContentBlocks,
-  parseTranscript,
-  findExitPlanIndex,
-  hasExecutionAfter,
-  extractLastAssistantText,
   EXECUTION_TOOLS,
+  extractLastAssistantText,
+  findExitPlanIndex,
+  getContentBlocks,
+  hasExecutionAfter,
+  parseTranscript,
   type TranscriptEntry,
 } from "../transcript.ts";
 
@@ -68,10 +68,7 @@ describe("parseTranscript", () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = join(
-      tmpdir(),
-      `cp-transcript-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
+    tempDir = join(tmpdir(), `cp-transcript-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(tempDir, { recursive: true });
   });
 
@@ -198,7 +195,7 @@ describe("findExitPlanIndex", () => {
         type: "human",
         message: {
           role: "user",
-          content: [{ type: "tool_use", name: "ExitPlanMode" }] as any,
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
         },
       },
     ];
@@ -223,10 +220,7 @@ describe("hasExecutionAfter", () => {
 
   it("returns true for each execution tool type", () => {
     for (const tool of EXECUTION_TOOLS) {
-      const entries: TranscriptEntry[] = [
-        makeToolEntry("ExitPlanMode"),
-        makeToolEntry(tool),
-      ];
+      const entries: TranscriptEntry[] = [makeToolEntry("ExitPlanMode"), makeToolEntry(tool)];
       expect(hasExecutionAfter(entries, 0)).toBe(true);
     }
   });

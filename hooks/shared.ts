@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 // shared.ts — Shared utilities for capture-plan and capture-done hooks
 
-import { appendFileSync, mkdirSync, readdirSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { appendFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
 
 // ---- Types ----
 
@@ -60,7 +60,9 @@ const DEFAULT_CONFIG: Config = {
 export function debugLog(msg: string, logFile: string): void {
   try {
     appendFileSync(logFile, msg);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 // ---- Config ----
@@ -89,14 +91,9 @@ export async function loadConfig(cwd?: string): Promise<Config> {
 
 // ---- Obsidian CLI ----
 
-export function runObsidian(
-  args: string[],
-  vault?: string,
-): { stdout: string; exitCode: number } {
+export function runObsidian(args: string[], vault?: string): { stdout: string; exitCode: number } {
   try {
-    const cmd = vault
-      ? ["obsidian", `vault=${vault}`, ...args]
-      : ["obsidian", ...args];
+    const cmd = vault ? ["obsidian", `vault=${vault}`, ...args] : ["obsidian", ...args];
     const result = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe" });
     return { stdout: result.stdout.toString().trim(), exitCode: result.exitCode };
   } catch {
@@ -194,7 +191,13 @@ export function getDatePartsFor(date: Date): DateParts {
   const monthName = new Intl.DateTimeFormat("en-US", { month: "long" }).format(date);
   const dayName = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date);
   return {
-    dd, mm, yyyy, monthName, dayName, hh, min,
+    dd,
+    mm,
+    yyyy,
+    monthName,
+    dayName,
+    hh,
+    min,
     dateKey: `${yyyy}-${mm}-${dd}`,
     datetime: `${yyyy}-${mm}-${dd}T${hh}:${min}`,
     timeStr: `${hh}:${min}`,
@@ -240,7 +243,9 @@ export async function summarizeWithClaude(
       if (lines.length >= 1) summary = lines[0].trim();
       if (lines.length >= 2) tags = lines[lines.length - 1].trim();
     }
-  } catch { /* fallback below */ }
+  } catch {
+    /* fallback below */
+  }
 
   if (!summary || summary.length > 300) {
     summary = content
@@ -275,7 +280,10 @@ export function shortSessionId(id: string): string {
 }
 
 export function formatTagsYaml(tagsCsv: string): string {
-  const tags = tagsCsv.split(",").map((t) => t.trim()).filter(Boolean);
+  const tags = tagsCsv
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
   if (tags.length === 0) return "";
   return tags.map((t) => `  - ${t}`).join("\n");
 }
@@ -283,7 +291,10 @@ export function formatTagsYaml(tagsCsv: string): string {
 // ---- Tags ----
 
 export function mergeTags(existing: string[], newTagsCsv: string): string {
-  const newTags = newTagsCsv.split(",").map((t) => t.trim()).filter(Boolean);
+  const newTags = newTagsCsv
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
   const seen = new Set<string>();
   const merged: string[] = [];
   for (const tag of [...existing, ...newTags]) {
@@ -296,17 +307,10 @@ export function mergeTags(existing: string[], newTagsCsv: string): string {
   return merged.join(",");
 }
 
-export function mergeTagsOnDailyNote(
-  newTags: string,
-  journalPath: string,
-  vault?: string,
-): void {
+export function mergeTagsOnDailyNote(newTags: string, journalPath: string, vault?: string): void {
   if (!journalPath) return;
   const pathWithExt = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
-  const tagsResult = runObsidian(
-    ["property:read", `name=tags`, `path=${pathWithExt}`],
-    vault,
-  );
+  const tagsResult = runObsidian(["property:read", `name=tags`, `path=${pathWithExt}`], vault);
   const existingTags = tagsResult.stdout
     .split("\n")
     .filter((l) => !l.startsWith("Error:") && l.trim());
@@ -329,16 +333,9 @@ export function getJournalPath(config: Config): string {
   return getJournalPathForDate(config, new Date());
 }
 
-export function appendToJournal(
-  content: string,
-  journalPath: string,
-  vault?: string,
-): void {
+export function appendToJournal(content: string, journalPath: string, vault?: string): void {
   const pathWithExt = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
-  const result = runObsidian(
-    ["append", `path=${pathWithExt}`, `content=${content}`],
-    vault,
-  );
+  const result = runObsidian(["append", `path=${pathWithExt}`, `content=${content}`], vault);
   if (result.exitCode !== 0) {
     // File doesn't exist yet — create it, then append
     runObsidian(["create", `path=${journalPath}`, "content= ", "silent"], vault);
@@ -416,7 +413,8 @@ export function nextCounter(dateDirPath: string): number {
     }
     return max + 1;
   } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") return 1;
+    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT")
+      return 1;
     throw err;
   }
 }
@@ -427,17 +425,12 @@ export function padCounter(n: number): string {
 
 // ---- Session State ----
 
-export async function writeSessionState(
-  sessionId: string,
-  state: SessionState,
-): Promise<void> {
+export async function writeSessionState(sessionId: string, state: SessionState): Promise<void> {
   const path = join(STATE_DIR, "sessions", `${sessionId}.json`);
   await Bun.write(path, JSON.stringify(state));
 }
 
-export async function readSessionState(
-  sessionId: string,
-): Promise<SessionState | null> {
+export async function readSessionState(sessionId: string): Promise<SessionState | null> {
   try {
     const path = join(STATE_DIR, "sessions", `${sessionId}.json`);
     return JSON.parse(await Bun.file(path).text()) as SessionState;
@@ -450,7 +443,9 @@ export function deleteSessionState(sessionId: string): void {
   try {
     const path = join(STATE_DIR, "sessions", `${sessionId}.json`);
     Bun.spawnSync(["rm", "-f", path]);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 // ---- Plan Frontmatter Parsing ----
@@ -503,19 +498,18 @@ export function parsePlanFrontmatter(content: string): PlanFrontmatter {
 
 // ---- Transcript ----
 
-export function findTranscriptPath(
-  sessionId: string,
-  cwd?: string,
-): string | null {
+export function findTranscriptPath(sessionId: string, cwd?: string): string | null {
   const projectsDir = join(homedir(), ".claude", "projects");
 
   // Try cwd-derived project slug first
   if (cwd) {
-    const slug = "-" + cwd.replace(/\//g, "-");
+    const slug = `-${cwd.replace(/\//g, "-")}`;
     const p = join(projectsDir, slug, `${sessionId}.jsonl`);
     try {
       if (Bun.file(p).size > 0) return p;
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
   }
 
   // Fallback: scan all project directories
@@ -524,9 +518,13 @@ export function findTranscriptPath(
       const p = join(projectsDir, dir, `${sessionId}.jsonl`);
       try {
         if (Bun.file(p).size > 0) return p;
-      } catch { /* */ }
+      } catch {
+        /* */
+      }
     }
-  } catch { /* */ }
+  } catch {
+    /* */
+  }
 
   return null;
 }

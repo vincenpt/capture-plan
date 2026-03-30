@@ -4,25 +4,25 @@
 
 import { join } from "node:path";
 import {
+  appendToJournal,
   debugLog,
-  loadConfig,
-  runObsidian,
   extractTitle,
-  stripTitleLine,
-  toSlug,
-  summarizeWithClaude,
-  mergeTagsOnDailyNote,
+  formatTagsYaml,
   getDateParts,
   getJournalPath,
+  getProjectName,
   getVaultPath,
-  appendToJournal,
+  loadConfig,
+  mergeTagsOnDailyNote,
   nextCounter,
   padCounter,
-  writeSessionState,
-  getProjectName,
-  formatTagsYaml,
-  shortSessionId,
+  runObsidian,
   type SessionState,
+  shortSessionId,
+  stripTitleLine,
+  summarizeWithClaude,
+  toSlug,
+  writeSessionState,
 } from "./shared.ts";
 
 const DEBUG_LOG = "/tmp/capture-plan-debug.log";
@@ -42,9 +42,7 @@ interface HookPayload {
     planFilePath?: string;
     [key: string]: unknown;
   };
-  tool_response?:
-    | { plan?: string; filePath?: string; [key: string]: unknown }
-    | string;
+  tool_response?: { plan?: string; filePath?: string; [key: string]: unknown } | string;
 }
 
 async function extractPlanContent(
@@ -59,7 +57,9 @@ async function extractPlanContent(
     return { content: resp.plan, source: "tool_response.plan", file: "" };
   }
   if (resp.filePath && resp.filePath !== "null") {
-    const content = await Bun.file(resp.filePath).text().catch(() => "");
+    const content = await Bun.file(resp.filePath)
+      .text()
+      .catch(() => "");
     if (content) return { content, source: "tool_response.filePath", file: resp.filePath };
   }
   if (payload.tool_input?.plan && payload.tool_input.plan !== "null") {
@@ -67,7 +67,9 @@ async function extractPlanContent(
   }
   const planFilePath = payload.tool_input?.planFilePath;
   if (planFilePath && planFilePath !== "null") {
-    const content = await Bun.file(planFilePath).text().catch(() => "");
+    const content = await Bun.file(planFilePath)
+      .text()
+      .catch(() => "");
     if (content) return { content, source: "tool_input.planFilePath", file: planFilePath };
   }
   return null;
@@ -94,7 +96,7 @@ async function main(): Promise<void> {
     const { content: planContent, source: planSource, file: planFile } = extraction;
     const title = extractTitle(planContent);
     const slug = toSlug(title);
-    const { dd, mm, yyyy, dateKey, datetime, timeStr, ampmTime } = getDateParts();
+    const { dd, mm, yyyy, dateKey, datetime, ampmTime } = getDateParts();
 
     const config = await loadConfig(payload.cwd);
     const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;

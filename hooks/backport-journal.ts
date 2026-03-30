@@ -2,42 +2,42 @@
 // backport-journal.ts — Import plans from ~/.claude/plans/ into Obsidian vault + journal
 // CLI script (not a hook). Run via: bun hooks/backport-journal.ts [options]
 
-import { readdirSync, statSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import {
-  loadConfig,
-  getVaultPath,
+  appendToJournal,
+  type Config,
   extractTitle,
-  parsePlanFrontmatter,
-  summarizeWithClaude,
+  formatTagsYaml,
   getDatePartsFor,
   getJournalPathForDate,
-  getProjectName,
   getProjectLabel,
-  toSlug,
-  stripTitleLine,
-  formatTagsYaml,
+  getProjectName,
+  getVaultPath,
+  loadConfig,
+  mergeTagsOnDailyNote,
   nextCounter,
   padCounter,
+  parsePlanFrontmatter,
   runObsidian,
-  appendToJournal,
-  mergeTagsOnDailyNote,
-  type Config,
+  stripTitleLine,
+  summarizeWithClaude,
+  toSlug,
 } from "./shared.ts";
 
 // ---- Types ----
 
 export interface PlanInfo {
-  sourceSlug: string;       // e.g., "abundant-juggling-petal"
-  sourcePath: string;       // ~/.claude/plans/abundant-juggling-petal.md
-  title: string;            // First # heading
-  date: string;             // YYYY-MM-DD from file birthtime
-  time: string;             // HH:MM from file birthtime
-  ampmTime: string;         // "2:30 PM"
-  projectCwd: string;       // /Users/k/src/perforce/cto/p4c-backoffice
-  projectLabel: string;     // cto/p4c-backoffice
-  isImported: boolean;      // true if source_slug already in vault
+  sourceSlug: string; // e.g., "abundant-juggling-petal"
+  sourcePath: string; // ~/.claude/plans/abundant-juggling-petal.md
+  title: string; // First # heading
+  date: string; // YYYY-MM-DD from file birthtime
+  time: string; // HH:MM from file birthtime
+  ampmTime: string; // "2:30 PM"
+  projectCwd: string; // /Users/k/src/perforce/cto/p4c-backoffice
+  projectLabel: string; // cto/p4c-backoffice
+  isImported: boolean; // true if source_slug already in vault
 }
 
 export interface BackportResult {
@@ -58,8 +58,8 @@ interface CliArgs {
   all: boolean;
   from?: string;
   to?: string;
-  plans?: string[];        // source slugs
-  project?: string;        // project label substring filter
+  plans?: string[]; // source slugs
+  project?: string; // project label substring filter
   dryRun: boolean;
   skipSummarize: boolean;
   cwd?: string;
@@ -118,9 +118,13 @@ export function buildSlugProjectMap(): Map<string, string> {
               map.set(entry.slug, entry.cwd);
               break;
             }
-          } catch { /* skip malformed lines */ }
+          } catch {
+            /* skip malformed lines */
+          }
         }
-      } catch { /* skip unreadable files */ }
+      } catch {
+        /* skip unreadable files */
+      }
     }
   }
   return map;
@@ -132,10 +136,7 @@ const PLAN_DIR_PATTERN = /^(\d{3,})-(.+)$/;
 const DATE_DIR_PATTERN = /^(\d{2})-(\d{2})$/;
 const YEAR_DIR_PATTERN = /^\d{4}$/;
 
-export function getImportedSlugs(
-  vaultPath: string,
-  planPathRelative: string,
-): Set<string> {
+export function getImportedSlugs(vaultPath: string, planPathRelative: string): Set<string> {
   const imported = new Set<string>();
   const basePath = join(vaultPath, planPathRelative);
   if (!existsSync(basePath)) return imported;
@@ -155,7 +156,9 @@ export function getImportedSlugs(
           const content = readFileSync(planFile, "utf-8");
           const fm = parsePlanFrontmatter(content);
           if (fm.source_slug) imported.add(fm.source_slug);
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       }
     }
   }
@@ -167,7 +170,7 @@ export function getImportedSlugs(
 export function discoverPlans(
   vaultPath: string,
   planPathRelative: string,
-  config: Config,
+  _config: Config,
 ): PlanInfo[] {
   const slugProjectMap = buildSlugProjectMap();
   const importedSlugs = getImportedSlugs(vaultPath, planPathRelative);
@@ -180,7 +183,11 @@ export function discoverPlans(
     const fullPath = join(PLANS_DIR, file);
 
     let content: string;
-    try { content = readFileSync(fullPath, "utf-8"); } catch { continue; }
+    try {
+      content = readFileSync(fullPath, "utf-8");
+    } catch {
+      continue;
+    }
 
     const title = extractTitle(content);
     const stat = statSync(fullPath);
@@ -208,17 +215,16 @@ export function discoverPlans(
 
 // ---- Filtering ----
 
-export function filterPlans(
-  plans: PlanInfo[],
-  args: CliArgs,
-): PlanInfo[] {
+export function filterPlans(plans: PlanInfo[], args: CliArgs): PlanInfo[] {
   let filtered = plans;
 
   if (args.from) {
-    filtered = filtered.filter((p) => p.date >= args.from!);
+    const from = args.from;
+    filtered = filtered.filter((p) => p.date >= from);
   }
   if (args.to) {
-    filtered = filtered.filter((p) => p.date <= args.to!);
+    const to = args.to;
+    filtered = filtered.filter((p) => p.date <= to);
   }
   if (args.project) {
     const proj = args.project.toLowerCase();
@@ -240,13 +246,15 @@ Line 2: 1-2 lowercase kebab-case tags relevant to the plan topic (comma-separate
 Output ONLY these two lines.`;
 
 function fallbackSummary(content: string): string {
-  return content
-    .replace(/^---[\s\S]*?---/, "")
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/^(?:#+\s*|\|.*\|$|\s*[-*]\s+)/gm, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 200) || "Captured from Claude Code session.";
+  return (
+    content
+      .replace(/^---[\s\S]*?---/, "")
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/^(?:#+\s*|\|.*\|$|\s*[-*]\s+)/gm, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 200) || "Captured from Claude Code session."
+  );
 }
 
 export async function backportPlans(
@@ -279,7 +287,7 @@ export async function backportPlans(
       const content = readFileSync(plan.sourcePath, "utf-8");
       const title = plan.title;
       const slug = toSlug(title);
-      const { dd, mm, yyyy } = getDatePartsFor(new Date(plan.date + "T12:00:00"));
+      const { dd, mm, yyyy } = getDatePartsFor(new Date(`${plan.date}T12:00:00`));
       const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
       const dateDirAbsolute = join(vaultPath, dateDirRelative);
       const counter = nextCounter(dateDirAbsolute);
@@ -373,7 +381,9 @@ async function main(): Promise<void> {
   const vaultPath = getVaultPath(config.vault);
 
   if (!vaultPath) {
-    console.error(JSON.stringify({ error: "Cannot resolve vault path. Check your capture-plan.toml config." }));
+    console.error(
+      JSON.stringify({ error: "Cannot resolve vault path. Check your capture-plan.toml config." }),
+    );
     process.exit(1);
   }
 
@@ -386,7 +396,11 @@ async function main(): Promise<void> {
   }
 
   if (!args.all && !args.from && !args.to && !args.plans && !args.project) {
-    console.error(JSON.stringify({ error: "Specify --all, --from/--to, --project, or --plans to select plans for import." }));
+    console.error(
+      JSON.stringify({
+        error: "Specify --all, --from/--to, --project, or --plans to select plans for import.",
+      }),
+    );
     process.exit(1);
   }
 
