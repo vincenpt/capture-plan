@@ -415,8 +415,8 @@ export function nextCounter(dateDirPath: string): number {
       }
     }
     return max + 1;
-  } catch (err: any) {
-    if (err?.code === "ENOENT") return 1;
+  } catch (err: unknown) {
+    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") return 1;
     throw err;
   }
 }

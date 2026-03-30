@@ -241,7 +241,7 @@ describe("appendToJournal", () => {
   beforeEach(() => {
     calls = [];
     spawnSyncSpy = spyOn(Bun, "spawnSync").mockImplementation(
-      (cmd: any, opts: any) => {
+      ((cmd: any, opts: any) => {
         calls.push({ cmd: [...cmd], opts });
         // First call succeeds by default
         return {
@@ -250,7 +250,7 @@ describe("appendToJournal", () => {
           exitCode: 0,
           success: true,
         } as any;
-      },
+      }) as any,
     );
   });
 
@@ -330,7 +330,7 @@ describe("mergeTagsOnDailyNote", () => {
 
   it("calls property:read then property:set", () => {
     spawnSyncSpy = spyOn(Bun, "spawnSync").mockImplementation(
-      (cmd: any, _opts: any) => {
+      ((cmd: any, _opts: any) => {
         calls.push([...cmd]);
         // property:read returns existing tags
         if (cmd.includes("property:read")) {
@@ -347,7 +347,7 @@ describe("mergeTagsOnDailyNote", () => {
           exitCode: 0,
           success: true,
         } as any;
-      },
+      }) as any,
     );
 
     mergeTagsOnDailyNote("new-tag", "Journal/2026/03/29", "vault");
