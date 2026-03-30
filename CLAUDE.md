@@ -23,6 +23,13 @@ bun run check:fix                     # Auto-fix lint + format issues
 
 No build step — Bun runs TypeScript natively. Biome handles linting and formatting (`biome.json`).
 
+## Code Standards
+
+- **No `any` types** — use proper interfaces, `unknown`, or type-safe helpers. `noExplicitAny` is an error.
+- **No non-null assertions (`!`)** — use optional chaining (`?.`), guards, or local const extraction instead.
+- For Bun process mocks in tests, use the `spawnSyncResult()` helper in `shared.external.test.ts` instead of `as any` casts.
+- Run `bun run check` before committing to catch lint + format issues.
+
 ## Architecture
 
 ### Hook Data Flow
