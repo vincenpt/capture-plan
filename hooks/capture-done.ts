@@ -31,6 +31,7 @@ import {
   findExitPlanIndex,
   hasExecutionAfter,
   parseTranscript,
+  selectDoneText,
   type TranscriptStats,
 } from "./transcript.ts";
 
@@ -167,14 +168,8 @@ async function main(): Promise<void> {
     // Summarize with Haiku
     const { summary, tags: newTags } = await summarizeWithClaude(haikuInput, DONE_SYSTEM_PROMPT);
 
-    // Select the "Done" text for the Summary section body
-    // Prefer the last assistant message (Claude's exact completion text)
-    const doneText =
-      stats.lastAssistantText.length >= MIN_DONE_LENGTH
-        ? stats.lastAssistantText
-        : payloadMessage.length >= MIN_DONE_LENGTH
-          ? payloadMessage
-          : summary;
+    // Select the richest available text for the Summary section body
+    const doneText = selectDoneText(payloadMessage, stats, summary);
 
     // Build the summary note
     const { datetime, ampmTime } = getDateParts();
@@ -213,6 +208,9 @@ ${doneText}
 ## Files Changed
 
 ${fileList}
+
+---
+*Duration: ${duration}*
 `;
 
     const escapedContent = noteContent.replace(/\n/g, "\\n");

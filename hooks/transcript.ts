@@ -132,6 +132,28 @@ export function extractLastAssistantText(entries: TranscriptEntry[], afterIdx: n
   return "";
 }
 
+export function extractConclusionText(
+  entries: TranscriptEntry[],
+  afterIdx: number,
+  maxEntries = 3,
+): string {
+  // Walk backwards, collect text from the last N assistant entries that have text
+  const collected: string[] = [];
+  for (let i = entries.length - 1; i > afterIdx && collected.length < maxEntries; i--) {
+    const blocks = getContentBlocks(entries[i]);
+    const texts: string[] = [];
+    for (const block of blocks) {
+      if (block.type === "text" && block.text) {
+        texts.push(block.text);
+      }
+    }
+    if (texts.length > 0) collected.push(texts.join("\n\n"));
+  }
+  // Reverse to chronological order
+  collected.reverse();
+  return collected.join("\n\n");
+}
+
 const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
 export function collectChangedFiles(entries: TranscriptEntry[], afterIdx: number): string[] {
@@ -165,6 +187,23 @@ export interface ExecutionStats {
   filesChanged: string[];
   allAssistantText: string;
   lastAssistantText: string;
+  conclusionText: string;
+}
+
+const MIN_DONE_LENGTH = 50;
+
+/** Select the richest available text for the Summary section body.
+ *  Priority: payload (CLI's rendered conclusion) > conclusion (multi-entry tail) >
+ *  last single entry > Haiku summary */
+export function selectDoneText(
+  payloadMessage: string,
+  stats: ExecutionStats,
+  summary: string,
+): string {
+  if (payloadMessage.length >= MIN_DONE_LENGTH) return payloadMessage;
+  if (stats.conclusionText.length >= MIN_DONE_LENGTH) return stats.conclusionText;
+  if (stats.lastAssistantText.length >= MIN_DONE_LENGTH) return stats.lastAssistantText;
+  return summary;
 }
 
 export function collectExecutionStats(
@@ -175,6 +214,7 @@ export function collectExecutionStats(
     filesChanged: collectChangedFiles(entries, afterIdx),
     allAssistantText: collectAllAssistantText(entries, afterIdx),
     lastAssistantText: extractLastAssistantText(entries, afterIdx),
+    conclusionText: extractConclusionText(entries, afterIdx),
   };
 }
 
