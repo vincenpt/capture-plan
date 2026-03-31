@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 // shared.ts — Shared utilities for capture-plan and capture-done hooks
 
-import { appendFileSync, readdirSync } from "node:fs";
+import { appendFileSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import type { TranscriptStats } from "./transcript.ts";
+import type { McpServerInfo, ToolUseRecord, TranscriptStats } from "./transcript.ts";
 
 // ---- Types ----
 
@@ -25,6 +25,7 @@ export interface SessionState {
   project?: string;
   tags?: string;
   model?: string;
+  planStats?: TranscriptStats;
 }
 
 export interface PlanFrontmatter {
@@ -43,12 +44,7 @@ export interface PlanFrontmatter {
 
 export const HOOKS_DIR = dirname(Bun.main);
 export const PLUGIN_ROOT = dirname(HOOKS_DIR);
-export let STATE_DIR = join(HOOKS_DIR, "state");
 
-/** @internal Test-only setter for STATE_DIR */
-export function _setStateDirForTest(dir: string): void {
-  STATE_DIR = dir;
-}
 const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.toml");
 const USER_GLOBAL_CONFIG = join(homedir(), ".config", "capture-plan", "config.toml");
 
@@ -441,26 +437,139 @@ export function padCounter(n: number): string {
   return String(n).padStart(3, "0");
 }
 
-// ---- Session State ----
+// ---- Session State (Vault-based) ----
 
-export async function writeSessionState(sessionId: string, state: SessionState): Promise<void> {
-  const path = join(STATE_DIR, "sessions", `${sessionId}.json`);
-  await Bun.write(path, JSON.stringify(state));
-}
+const STALE_STATE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-export async function readSessionState(sessionId: string): Promise<SessionState | null> {
-  try {
-    const path = join(STATE_DIR, "sessions", `${sessionId}.json`);
-    return JSON.parse(await Bun.file(path).text()) as SessionState;
-  } catch {
-    return null;
+function serializeStateToFrontmatter(state: SessionState): string {
+  const lines: string[] = ["---"];
+  lines.push(`session_id: "${state.session_id}"`);
+  lines.push(`plan_slug: "${state.plan_slug}"`);
+  lines.push(`plan_title: "${state.plan_title.replace(/"/g, '\\"')}"`);
+  lines.push(`plan_dir: "${state.plan_dir}"`);
+  lines.push(`date_key: "${state.date_key}"`);
+  lines.push(`timestamp: "${state.timestamp}"`);
+  if (state.journal_path) lines.push(`journal_path: "${state.journal_path}"`);
+  if (state.project) lines.push(`project: "${state.project}"`);
+  if (state.tags) lines.push(`tags: "${state.tags}"`);
+  if (state.model) lines.push(`model: "${state.model}"`);
+  if (state.planStats) {
+    const json = JSON.stringify(state.planStats).replace(/"/g, '\\"');
+    lines.push(`plan_stats_json: "${json}"`);
   }
+  lines.push("---");
+  return lines.join("\n");
 }
 
-export function deleteSessionState(sessionId: string): void {
+export function parseStateFromFrontmatter(content: string): SessionState | null {
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return null;
+  const fm = fmMatch[1];
+
+  const get = (key: string): string | undefined => {
+    const m = fm.match(new RegExp(`^${key}:\\s*"(.*)"\\s*$`, "m"));
+    return m ? m[1] : undefined;
+  };
+
+  const sessionId = get("session_id");
+  const planSlug = get("plan_slug");
+  const planTitle = get("plan_title");
+  const planDir = get("plan_dir");
+  const dateKey = get("date_key");
+  const timestamp = get("timestamp");
+  if (!sessionId || !planSlug || !planTitle || !planDir || !dateKey || !timestamp) return null;
+
+  const state: SessionState = {
+    session_id: sessionId,
+    plan_slug: planSlug,
+    plan_title: planTitle.replace(/\\"/g, '"'),
+    plan_dir: planDir,
+    date_key: dateKey,
+    timestamp,
+    journal_path: get("journal_path"),
+    project: get("project"),
+    tags: get("tags"),
+    model: get("model"),
+  };
+
+  const statsJson = get("plan_stats_json");
+  if (statsJson) {
+    try {
+      state.planStats = JSON.parse(statsJson.replace(/\\"/g, '"')) as TranscriptStats;
+    } catch {
+      /* ignore malformed stats */
+    }
+  }
+
+  return state;
+}
+
+export function writeVaultState(state: SessionState, vault?: string): boolean {
+  const content = serializeStateToFrontmatter(state);
+  const escaped = content.replace(/\n/g, "\\n");
+  const result = runObsidian(
+    ["create", `path=${state.plan_dir}/state`, `content=${escaped}`, "silent"],
+    vault,
+  );
+  return result.exitCode === 0;
+}
+
+export function scanForVaultState(sessionId: string, config: Config): SessionState | null {
+  const vaultPath = getVaultPath(config.vault);
+  if (!vaultPath) return null;
+
+  const planRoot = join(vaultPath, config.plan_path);
+  let match: SessionState | null = null;
+
+  // State files expire in 2h, so only scan today + yesterday (covers midnight crossover)
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 86_400_000);
+  const recentDirs = [today, yesterday].map((d) => {
+    const parts = getDatePartsFor(d);
+    return { year: parts.yyyy, date: `${parts.mm}-${parts.dd}` };
+  });
+
+  for (const { year, date } of recentDirs) {
+    const datePath = join(planRoot, year, date);
+    try {
+      for (const planDir of readdirSync(datePath, { withFileTypes: true })) {
+        if (!planDir.isDirectory()) continue;
+        const stateFile = join(datePath, planDir.name, "state.md");
+        try {
+          const text = readFileSync(stateFile, "utf8");
+          if (!text) continue;
+          const state = parseStateFromFrontmatter(text);
+          if (!state) continue;
+
+          // Housekeeping: remove stale state files
+          const age = Date.now() - new Date(state.timestamp).getTime();
+          if (age > STALE_STATE_MS) {
+            try {
+              unlinkSync(stateFile);
+            } catch {
+              /* ignore */
+            }
+            continue;
+          }
+
+          if (state.session_id === sessionId) {
+            match = state;
+          }
+        } catch {
+          /* file doesn't exist or unreadable — skip */
+        }
+      }
+    } catch {
+      /* date directory doesn't exist — skip */
+    }
+  }
+
+  return match;
+}
+
+export function deleteVaultState(planDir: string, vaultPath: string): void {
   try {
-    const path = join(STATE_DIR, "sessions", `${sessionId}.json`);
-    Bun.spawnSync(["rm", "-f", path]);
+    unlinkSync(join(vaultPath, planDir, "state.md"));
   } catch {
     /* ignore */
   }
@@ -524,13 +633,11 @@ export function formatStatsYaml(stats: TranscriptStats): string {
   const lines: string[] = [];
   lines.push(`model: ${stats.model}`);
   lines.push(`duration: "${formatDuration(stats.durationMs)}"`);
-  lines.push("tokens:");
-  lines.push(`  input: ${stats.tokens.input}`);
-  lines.push(`  output: ${stats.tokens.output}`);
-  lines.push(`  cache_read: ${stats.tokens.cache_read}`);
-  lines.push(`  cache_create: ${stats.tokens.cache_create}`);
+  lines.push(`tokens_in: ${stats.tokens.input}`);
+  lines.push(`tokens_out: ${stats.tokens.output}`);
   lines.push(`subagents: ${stats.subagentCount}`);
   lines.push(`tools_used: ${stats.totalToolCalls}`);
+  lines.push(`total_errors: ${stats.totalErrors}`);
   if (stats.mcpServers.length > 0) {
     lines.push("mcp_servers:");
     for (const srv of stats.mcpServers) {
@@ -540,31 +647,134 @@ export function formatStatsYaml(stats: TranscriptStats): string {
   return lines.join("\n");
 }
 
-export function formatToolUseAddendum(stats: TranscriptStats): string {
-  if (stats.tools.length === 0) return "";
+export function formatModelYaml(stats: TranscriptStats | null): string {
+  return stats?.model ? `\nmodel: ${stats.model}` : "";
+}
+
+export function formatToolTable(tools: ToolUseRecord[]): string {
+  if (tools.length === 0) return "";
   const lines: string[] = [];
-  lines.push("## Session Stats");
-  lines.push("");
   lines.push("| Tool | Calls | Errors |");
   lines.push("|------|------:|-------:|");
-  for (const tool of stats.tools) {
+  for (const tool of tools) {
     lines.push(`| ${tool.name} | ${tool.calls} | ${tool.errors} |`);
   }
-  lines.push("");
-  lines.push(
-    `**${formatNumber(stats.totalToolCalls)} tool calls** | **${formatNumber(stats.tokens.input)} in / ${formatNumber(stats.tokens.output)} out tokens** | **${stats.totalErrors} errors**`,
-  );
   return lines.join("\n");
 }
 
-export function formatStatsInserts(stats: TranscriptStats | null): {
-  statsYaml: string;
-  addendumSection: string;
-} {
-  const statsYaml = stats ? `\n${formatStatsYaml(stats)}` : "";
-  const addendum = stats ? formatToolUseAddendum(stats) : "";
-  const addendumSection = addendum ? `\n\n---\n\n${addendum}\n` : "";
-  return { statsYaml, addendumSection };
+export function mergeTranscriptStats(a: TranscriptStats, b: TranscriptStats): TranscriptStats {
+  // Merge tokens
+  const tokens = {
+    input: a.tokens.input + b.tokens.input,
+    output: a.tokens.output + b.tokens.output,
+    cache_read: a.tokens.cache_read + b.tokens.cache_read,
+    cache_create: a.tokens.cache_create + b.tokens.cache_create,
+  };
+
+  // Merge tool records — sum calls/errors for same-named tools
+  const toolMap = new Map<string, { calls: number; errors: number }>();
+  for (const t of [...a.tools, ...b.tools]) {
+    const existing = toolMap.get(t.name);
+    if (existing) {
+      existing.calls += t.calls;
+      existing.errors += t.errors;
+    } else {
+      toolMap.set(t.name, { calls: t.calls, errors: t.errors });
+    }
+  }
+  const tools: ToolUseRecord[] = [...toolMap.entries()]
+    .map(([name, rec]) => ({ name, calls: rec.calls, errors: rec.errors }))
+    .sort((x, y) => y.calls - x.calls);
+
+  // Merge MCP servers — union tool lists, sum calls
+  const mcpMap = new Map<string, { tools: Set<string>; calls: number }>();
+  for (const srv of [...a.mcpServers, ...b.mcpServers]) {
+    const existing = mcpMap.get(srv.name);
+    if (existing) {
+      for (const t of srv.tools) existing.tools.add(t);
+      existing.calls += srv.calls;
+    } else {
+      mcpMap.set(srv.name, { tools: new Set(srv.tools), calls: srv.calls });
+    }
+  }
+  const mcpServers: McpServerInfo[] = [...mcpMap.entries()]
+    .map(([name, info]) => ({ name, tools: [...info.tools], calls: info.calls }))
+    .sort((x, y) => y.calls - x.calls);
+
+  const totalToolCalls = a.totalToolCalls + b.totalToolCalls;
+  const totalErrors = a.totalErrors + b.totalErrors;
+  const model = a.model !== "unknown" ? a.model : b.model;
+  const durationMs = a.durationMs + b.durationMs;
+
+  return {
+    model,
+    durationMs,
+    tokens,
+    subagentCount: a.subagentCount + b.subagentCount,
+    tools,
+    mcpServers,
+    totalToolCalls,
+    totalErrors,
+  };
+}
+
+export function formatToolsNoteContent(opts: {
+  planStats: TranscriptStats | null;
+  execStats: TranscriptStats | null;
+  planTitle: string;
+  planDir: string;
+  journalPath: string;
+  datetime: string;
+  project?: string;
+}): string | null {
+  const { planStats, execStats, planTitle, planDir, journalPath, datetime, project } = opts;
+  if (!planStats && !execStats) return null;
+
+  // Compute combined stats for frontmatter
+  const combined =
+    planStats && execStats
+      ? mergeTranscriptStats(planStats, execStats)
+      : ((planStats ?? execStats) as TranscriptStats);
+
+  const statsYaml = formatStatsYaml(combined);
+
+  // Build body sections
+  const sections: string[] = [];
+
+  const addPhase = (heading: string, stats: TranscriptStats): void => {
+    if (sections.length > 0) sections.push("");
+    sections.push(`## ${heading}`);
+    sections.push("");
+    sections.push(
+      `*${formatDuration(stats.durationMs)} — ${formatNumber(stats.totalToolCalls)} tool calls, ${stats.totalErrors} errors*`,
+    );
+    sections.push("");
+    const table = formatToolTable(stats.tools);
+    if (table) sections.push(table);
+  };
+
+  if (planStats) addPhase("Planning Phase", planStats);
+  if (execStats) addPhase("Execution Phase", execStats);
+
+  // Combined summary
+  sections.push("");
+  sections.push("## Combined");
+  sections.push("");
+  sections.push(
+    `**${formatNumber(combined.totalToolCalls)} tool calls** | **${formatNumber(combined.tokens.input)} in / ${formatNumber(combined.tokens.output)} out tokens** | **${combined.totalErrors} errors**`,
+  );
+
+  const body = sections.join("\n");
+
+  return `---
+created: "[[${journalPath}|${datetime}]]"
+plan: "[[${planDir}/plan|${planTitle}]]"${project ? `\nproject: ${project}` : ""}
+${statsYaml}
+---
+# Session Tools: ${planTitle}
+
+${body}
+`;
 }
 
 // ---- Transcript ----

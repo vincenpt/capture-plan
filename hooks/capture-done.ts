@@ -2,16 +2,17 @@
 // capture-done.ts — Claude Code Stop Hook
 // Captures the "Done" summary after plan execution completes
 
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   appendRowToJournalSection,
   appendToJournal,
   debugLog,
-  deleteSessionState,
+  deleteVaultState,
   findTranscriptPath,
   formatDuration,
-  formatStatsInserts,
+  formatModelYaml,
   formatTagsYaml,
+  formatToolsNoteContent,
   getDateParts,
   getJournalPath,
   getProjectName,
@@ -19,13 +20,14 @@ import {
   loadConfig,
   mergeTags,
   mergeTagsOnDailyNote,
-  readSessionState,
   runObsidian,
+  scanForVaultState,
   summarizeWithClaude,
 } from "./shared.ts";
 import {
   collectExecutionStats,
   collectTranscriptStats,
+  computeDurationMs,
   findExitPlanIndex,
   hasExecutionAfter,
   parseTranscript,
@@ -33,7 +35,6 @@ import {
 } from "./transcript.ts";
 
 const DEBUG_LOG = "/tmp/capture-done-debug.log";
-const STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
 const MIN_DONE_LENGTH = 50;
 
 const DONE_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given context about a completed coding session (plan title, duration, files changed, and execution narrative), output exactly two lines:
@@ -63,8 +64,11 @@ async function main(): Promise<void> {
       process.exit(0);
     }
 
-    // Gate: check for pending session state
-    const state = await readSessionState(sessionId);
+    // Load config early — needed for vault-based state lookup
+    const config = await loadConfig(payload.cwd);
+
+    // Gate: scan vault for pending session state (also cleans up stale states)
+    const state = scanForVaultState(sessionId, config);
     if (!state) {
       // Most common case — no plan pending for this session
       process.exit(0);
@@ -72,13 +76,8 @@ async function main(): Promise<void> {
 
     debugLog(`Found state for session ${sessionId}: ${state.plan_title}\n`, DEBUG_LOG);
 
-    // Check staleness
-    const stateAge = Date.now() - new Date(state.timestamp).getTime();
-    if (stateAge > STALE_MS) {
-      debugLog(`State stale (${Math.round(stateAge / 60000)}m), cleaning up\n`, DEBUG_LOG);
-      deleteSessionState(sessionId);
-      process.exit(0);
-    }
+    // Resolve vault filesystem path (used for state cleanup and journal appends)
+    const vaultPath = getVaultPath(config.vault);
 
     // Find transcript
     let transcriptPath = payload.transcript_path || null;
@@ -97,7 +96,7 @@ async function main(): Promise<void> {
     const exitIdx = findExitPlanIndex(entries);
     if (exitIdx === -1) {
       debugLog("No ExitPlanMode in transcript\n", DEBUG_LOG);
-      deleteSessionState(sessionId);
+      if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
       process.exit(0);
     }
 
@@ -144,31 +143,31 @@ async function main(): Promise<void> {
       DEBUG_LOG,
     );
 
-    // Calculate execution duration
-    const durationMs = Date.now() - new Date(state.timestamp).getTime();
+    // Calculate session duration — prefer transcript timestamps (full session) over wall-clock
+    const transcriptDurationMs = computeDurationMs(entries);
+    const wallClockMs = Date.now() - new Date(state.timestamp).getTime();
+    const durationMs = transcriptDurationMs > 0 ? transcriptDurationMs : wallClockMs;
     const duration = formatDuration(durationMs);
 
     // Build richer context for Haiku summarization
+    // Put narrative first so that if Haiku fails, the fallback extracts from the narrative
+    // rather than echoing the structured metadata header
     const MAX_HAIKU_INPUT = 8000;
-    const haikuParts = [
+    const metadata = [
       `Plan: ${state.plan_title}`,
       `Duration: ${duration}`,
-      `Files changed (${stats.filesChanged.length}):`,
-      ...stats.filesChanged.map((f) => `  - ${f}`),
-      "",
-      "Execution narrative:",
-      narrativeText,
-    ];
-    let haikuInput = haikuParts.join("\n");
+      `Files changed (${stats.filesChanged.length}): ${stats.filesChanged.map((f) => basename(f)).join(", ")}`,
+    ].join(" | ");
+    let haikuInput = `${metadata}\n\n${narrativeText}`;
     if (haikuInput.length > MAX_HAIKU_INPUT) {
-      haikuInput = haikuInput.slice(-MAX_HAIKU_INPUT);
+      // Truncate from the front of the narrative, keeping the most recent text
+      haikuInput = `${metadata}\n\n${narrativeText.slice(-(MAX_HAIKU_INPUT - metadata.length - 2))}`;
     }
 
     // Summarize with Haiku
     const { summary, tags: newTags } = await summarizeWithClaude(haikuInput, DONE_SYSTEM_PROMPT);
 
     // Build the summary note
-    const config = await loadConfig(payload.cwd);
     const { datetime, ampmTime } = getDateParts();
     const journalPath = getJournalPath(config);
 
@@ -189,13 +188,12 @@ async function main(): Promise<void> {
         ? stats.filesChanged.map((f) => `- \`${f}\``).join("\n")
         : "_No file changes recorded_";
 
-    const { statsYaml, addendumSection } = formatStatsInserts(transcriptStats);
+    const modelYaml = formatModelYaml(transcriptStats);
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
 plan: "[[${state.plan_dir}/plan|${state.plan_title}]]"
-duration: "${duration}"
-summary: "${summary.replace(/"/g, '\\"')}"${statsYaml}
+duration: "${duration}"${modelYaml}
 ---
 # Done: ${state.plan_title}
 
@@ -207,7 +205,7 @@ ${summary}
 
 ## Files Changed
 
-${fileList}${addendumSection}
+${fileList}
 `;
 
     const escapedContent = noteContent.replace(/\n/g, "\\n");
@@ -217,15 +215,40 @@ ${fileList}${addendumSection}
     );
     if (createResult.exitCode !== 0) {
       debugLog("Failed to create summary note\n", DEBUG_LOG);
-      deleteSessionState(sessionId);
+      if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
       process.exit(0);
+    }
+
+    // Create plan-tools.md with combined stats from both phases
+    const planStats = state.planStats ?? null;
+    const toolsNoteContent = formatToolsNoteContent({
+      planStats,
+      execStats: transcriptStats,
+      planTitle: state.plan_title,
+      planDir: state.plan_dir,
+      journalPath,
+      datetime,
+      project,
+    });
+
+    if (toolsNoteContent) {
+      const toolsNotePath = `${state.plan_dir}/plan-tools`;
+      const escapedToolsContent = toolsNoteContent.replace(/\n/g, "\\n");
+      const toolsResult = runObsidian(
+        ["create", `path=${toolsNotePath}`, `content=${escapedToolsContent}`, "silent"],
+        config.vault,
+      );
+      if (toolsResult.exitCode !== 0) {
+        debugLog("Failed to create plan-tools note\n", DEBUG_LOG);
+      } else {
+        debugLog(`Plan tools captured -> ${toolsNotePath}.md\n`, DEBUG_LOG);
+      }
     }
 
     // Append row to existing plan section in journal
     const tableRow = `| [[${summaryPath}\\|${ampmTime}]] | ${summary} |`;
     let appended = false;
     const journalToModify = state.journal_path || journalPath;
-    const vaultPath = getVaultPath(config.vault);
 
     if (vaultPath) {
       const journalFile = journalToModify.endsWith(".md")
@@ -244,8 +267,8 @@ ${fileList}${addendumSection}
 
     mergeTagsOnDailyNote(newTags, journalPath, config.vault);
 
-    // Clean up session state
-    deleteSessionState(sessionId);
+    // Clean up session state from vault
+    if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
 
     console.error(`Done summary captured -> ${summaryPath}.md`);
     debugLog(`Summary captured for ${state.plan_title}\n`, DEBUG_LOG);

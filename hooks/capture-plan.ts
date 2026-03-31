@@ -8,7 +8,7 @@ import {
   debugLog,
   extractTitle,
   findTranscriptPath,
-  formatStatsInserts,
+  formatModelYaml,
   formatTagsYaml,
   getDateParts,
   getJournalPath,
@@ -24,7 +24,7 @@ import {
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
-  writeSessionState,
+  writeVaultState,
 } from "./shared.ts";
 import {
   collectTranscriptStats,
@@ -146,15 +146,15 @@ async function main(): Promise<void> {
     const project = getProjectName(payload.cwd);
     const tagsYaml = formatTagsYaml(newTags);
 
-    const { statsYaml, addendumSection } = formatStatsInserts(stats);
+    const modelYaml = formatModelYaml(stats);
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-session: "[[Sessions/${shortSessionId(sessionId)}]]"${statsYaml}
+session: "[[Sessions/${shortSessionId(sessionId)}]]"${modelYaml}
 ---
 # ${title}
 
-${stripTitleLine(planContent)}${addendumSection}
+${stripTitleLine(planContent)}
 `;
 
     const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${ampmTime}]] | ${summary} |`;
@@ -180,11 +180,15 @@ ${stripTitleLine(planContent)}${addendumSection}
       date_key: dateKey,
       timestamp: new Date().toISOString(),
       journal_path: journalPath,
-      project: getProjectName(payload.cwd),
+      project,
       tags: newTags,
       model: stats?.model,
+      planStats: stats ?? undefined,
     };
-    await writeSessionState(sessionId, state);
+    const stateWritten = writeVaultState(state, config.vault);
+    if (!stateWritten) {
+      debugLog("Failed to write vault state\n", DEBUG_LOG);
+    }
 
     console.log(`Plan captured -> ${planPath}.md`);
     debugLog(`State written for session ${sessionId}\n`, DEBUG_LOG);

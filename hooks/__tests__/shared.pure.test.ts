@@ -3,14 +3,17 @@ import {
   extractTitle,
   formatAmPm,
   formatDuration,
+  formatModelYaml,
   formatNumber,
   formatStatsYaml,
   formatTagsYaml,
-  formatToolUseAddendum,
+  formatToolsNoteContent,
+  formatToolTable,
   getDatePartsFor,
   getJournalPathForDate,
   getProjectName,
   mergeTags,
+  mergeTranscriptStats,
   padCounter,
   parsePlanFrontmatter,
   shortSessionId,
@@ -551,13 +554,11 @@ describe("formatStatsYaml", () => {
     const yaml = formatStatsYaml(baseStats);
     expect(yaml).toContain("model: claude-opus-4-6");
     expect(yaml).toContain('duration: "5m"');
-    expect(yaml).toContain("tokens:");
-    expect(yaml).toContain("  input: 12500");
-    expect(yaml).toContain("  output: 3200");
-    expect(yaml).toContain("  cache_read: 8000");
-    expect(yaml).toContain("  cache_create: 1500");
+    expect(yaml).toContain("tokens_in: 12500");
+    expect(yaml).toContain("tokens_out: 3200");
     expect(yaml).toContain("subagents: 2");
     expect(yaml).toContain("tools_used: 10");
+    expect(yaml).toContain("total_errors: 1");
     expect(yaml).toContain("mcp_servers:");
     expect(yaml).toContain("  - context-mode");
   });
@@ -574,41 +575,238 @@ describe("formatStatsYaml", () => {
       tokens: { input: 0, output: 0, cache_read: 0, cache_create: 0 },
     };
     const yaml = formatStatsYaml(stats);
-    expect(yaml).toContain("  input: 0");
-    expect(yaml).toContain("  output: 0");
+    expect(yaml).toContain("tokens_in: 0");
+    expect(yaml).toContain("tokens_out: 0");
   });
 });
 
-// ---- formatToolUseAddendum ----
+// ---- formatModelYaml ----
 
-describe("formatToolUseAddendum", () => {
-  const baseStats: TranscriptStats = {
-    model: "claude-opus-4-6",
-    durationMs: 300_000,
-    tokens: { input: 12500, output: 3200, cache_read: 0, cache_create: 0 },
-    subagentCount: 0,
-    tools: [
+describe("formatModelYaml", () => {
+  it("returns model line with leading newline", () => {
+    const stats: TranscriptStats = {
+      model: "claude-opus-4-6",
+      durationMs: 0,
+      tokens: { input: 0, output: 0, cache_read: 0, cache_create: 0 },
+      subagentCount: 0,
+      tools: [],
+      mcpServers: [],
+      totalToolCalls: 0,
+      totalErrors: 0,
+    };
+    expect(formatModelYaml(stats)).toBe("\nmodel: claude-opus-4-6");
+  });
+
+  it("returns empty string for null", () => {
+    expect(formatModelYaml(null)).toBe("");
+  });
+});
+
+// ---- formatToolTable ----
+
+describe("formatToolTable", () => {
+  it("renders markdown table rows", () => {
+    const tools = [
       { name: "Read", calls: 5, errors: 0 },
       { name: "Bash", calls: 3, errors: 1 },
+    ];
+    const table = formatToolTable(tools);
+    expect(table).toContain("| Tool | Calls | Errors |");
+    expect(table).toContain("|------|------:|-------:|");
+    expect(table).toContain("| Read | 5 | 0 |");
+    expect(table).toContain("| Bash | 3 | 1 |");
+  });
+
+  it("returns empty string when no tools", () => {
+    expect(formatToolTable([])).toBe("");
+  });
+});
+
+// ---- mergeTranscriptStats ----
+
+describe("mergeTranscriptStats", () => {
+  const planStats: TranscriptStats = {
+    model: "claude-opus-4-6",
+    durationMs: 60_000,
+    tokens: { input: 5000, output: 1000, cache_read: 3000, cache_create: 500 },
+    subagentCount: 1,
+    tools: [
+      { name: "Read", calls: 5, errors: 0 },
+      { name: "Grep", calls: 2, errors: 0 },
+    ],
+    mcpServers: [{ name: "context-mode", tools: ["ctx_search"], calls: 1 }],
+    totalToolCalls: 7,
+    totalErrors: 0,
+  };
+
+  const execStats: TranscriptStats = {
+    model: "claude-opus-4-6",
+    durationMs: 120_000,
+    tokens: { input: 10000, output: 4000, cache_read: 7000, cache_create: 1000 },
+    subagentCount: 2,
+    tools: [
+      { name: "Read", calls: 3, errors: 0 },
+      { name: "Edit", calls: 8, errors: 1 },
+      { name: "Bash", calls: 4, errors: 2 },
+    ],
+    mcpServers: [{ name: "context-mode", tools: ["ctx_execute"], calls: 3 }],
+    totalToolCalls: 15,
+    totalErrors: 3,
+  };
+
+  it("sums tokens across phases", () => {
+    const merged = mergeTranscriptStats(planStats, execStats);
+    expect(merged.tokens.input).toBe(15000);
+    expect(merged.tokens.output).toBe(5000);
+    expect(merged.tokens.cache_read).toBe(10000);
+    expect(merged.tokens.cache_create).toBe(1500);
+  });
+
+  it("sums tool calls for same-named tools", () => {
+    const merged = mergeTranscriptStats(planStats, execStats);
+    const readTool = merged.tools.find((t) => t.name === "Read");
+    expect(readTool?.calls).toBe(8);
+    expect(readTool?.errors).toBe(0);
+  });
+
+  it("preserves unique tools from each phase", () => {
+    const merged = mergeTranscriptStats(planStats, execStats);
+    expect(merged.tools.find((t) => t.name === "Grep")).toBeDefined();
+    expect(merged.tools.find((t) => t.name === "Edit")).toBeDefined();
+    expect(merged.tools.find((t) => t.name === "Bash")).toBeDefined();
+  });
+
+  it("sums totals", () => {
+    const merged = mergeTranscriptStats(planStats, execStats);
+    expect(merged.totalToolCalls).toBe(22);
+    expect(merged.totalErrors).toBe(3);
+    expect(merged.subagentCount).toBe(3);
+    expect(merged.durationMs).toBe(180_000);
+  });
+
+  it("merges MCP servers and unions tools", () => {
+    const merged = mergeTranscriptStats(planStats, execStats);
+    const srv = merged.mcpServers.find((s) => s.name === "context-mode");
+    expect(srv).toBeDefined();
+    expect(srv?.calls).toBe(4);
+    expect(srv?.tools).toContain("ctx_search");
+    expect(srv?.tools).toContain("ctx_execute");
+  });
+
+  it("picks non-unknown model", () => {
+    const aUnknown = { ...planStats, model: "unknown" };
+    const merged = mergeTranscriptStats(aUnknown, execStats);
+    expect(merged.model).toBe("claude-opus-4-6");
+  });
+});
+
+// ---- formatToolsNoteContent ----
+
+describe("formatToolsNoteContent", () => {
+  const baseOpts = {
+    planTitle: "My Plan",
+    planDir: "Claude/Plans/2026/03-30/001-my-plan",
+    journalPath: "Journal/2026/03-March/30-Monday",
+    datetime: "2026-03-30T14:30",
+  };
+
+  const planStats: TranscriptStats = {
+    model: "claude-opus-4-6",
+    durationMs: 60_000,
+    tokens: { input: 5000, output: 1000, cache_read: 0, cache_create: 0 },
+    subagentCount: 0,
+    tools: [{ name: "Read", calls: 3, errors: 0 }],
+    mcpServers: [],
+    totalToolCalls: 3,
+    totalErrors: 0,
+  };
+
+  const execStats: TranscriptStats = {
+    model: "claude-opus-4-6",
+    durationMs: 120_000,
+    tokens: { input: 10000, output: 4000, cache_read: 0, cache_create: 0 },
+    subagentCount: 1,
+    tools: [
+      { name: "Edit", calls: 5, errors: 1 },
+      { name: "Bash", calls: 3, errors: 0 },
     ],
     mcpServers: [],
     totalToolCalls: 8,
     totalErrors: 1,
   };
 
-  it("renders markdown table with tool breakdown", () => {
-    const addendum = formatToolUseAddendum(baseStats);
-    expect(addendum).toContain("## Session Stats");
-    expect(addendum).toContain("| Tool | Calls | Errors |");
-    expect(addendum).toContain("| Read | 5 | 0 |");
-    expect(addendum).toContain("| Bash | 3 | 1 |");
-    expect(addendum).toContain("**8 tool calls**");
-    expect(addendum).toContain("**12,500 in / 3,200 out tokens**");
-    expect(addendum).toContain("**1 errors**");
+  it("returns null when both phases are null", () => {
+    expect(formatToolsNoteContent({ ...baseOpts, planStats: null, execStats: null })).toBeNull();
   });
 
-  it("returns empty string when no tools", () => {
-    const stats = { ...baseStats, tools: [] };
-    expect(formatToolUseAddendum(stats)).toBe("");
+  it("includes frontmatter with combined stats", () => {
+    const content = formatToolsNoteContent({
+      ...baseOpts,
+      planStats,
+      execStats,
+    });
+    expect(content).toContain("tools_used: 11");
+    expect(content).toContain("total_errors: 1");
+    expect(content).toContain("tokens_in: 15000");
+    expect(content).toContain("tokens_out: 5000");
+  });
+
+  it("includes plan backlink in frontmatter", () => {
+    const content = formatToolsNoteContent({
+      ...baseOpts,
+      planStats,
+      execStats: null,
+    });
+    expect(content).toContain('plan: "[[Claude/Plans/2026/03-30/001-my-plan/plan|My Plan]]"');
+  });
+
+  it("renders both phase tables", () => {
+    const content = formatToolsNoteContent({
+      ...baseOpts,
+      planStats,
+      execStats,
+    });
+    expect(content).toContain("## Planning Phase");
+    expect(content).toContain("## Execution Phase");
+    expect(content).toContain("## Combined");
+  });
+
+  it("renders only planning phase when no execution", () => {
+    const content = formatToolsNoteContent({
+      ...baseOpts,
+      planStats,
+      execStats: null,
+    });
+    expect(content).toContain("## Planning Phase");
+    expect(content).not.toContain("## Execution Phase");
+  });
+
+  it("renders only execution phase when no planning stats", () => {
+    const content = formatToolsNoteContent({
+      ...baseOpts,
+      planStats: null,
+      execStats,
+    });
+    expect(content).not.toContain("## Planning Phase");
+    expect(content).toContain("## Execution Phase");
+  });
+
+  it("includes project in frontmatter when provided", () => {
+    const content = formatToolsNoteContent({
+      ...baseOpts,
+      planStats,
+      execStats: null,
+      project: "capture-plan",
+    });
+    expect(content).toContain("project: capture-plan");
+  });
+
+  it("includes title in heading", () => {
+    const content = formatToolsNoteContent({
+      ...baseOpts,
+      planStats,
+      execStats: null,
+    });
+    expect(content).toContain("# Session Tools: My Plan");
   });
 });

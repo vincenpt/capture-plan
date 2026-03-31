@@ -1,10 +1,10 @@
 ---
-description: Disable dev mode for the capture-plan plugin. Removes the symlink and restores the cached release copy.
+description: Disable dev mode for the capture-plan plugin. Removes symlinks and restores the cached release copies for both hooks and skills.
 ---
 
 # End Dev Mode
 
-Remove the dev-mode symlink and restore the installed plugin cache.
+Remove dev-mode symlinks and restore the installed plugin cache and marketplace.
 
 ## Procedure
 
@@ -16,21 +16,31 @@ Read `package.json` in the repo root to get the `version` field. Store it as `{V
 
 ```bash
 ls -la ~/.claude/plugins/cache/kriswill/capture-plan/{VERSION}
+ls -la ~/.claude/plugins/marketplaces/kriswill
 ```
 
-If it is **not** a symlink, tell the user dev mode is not active and stop.
+If **neither** is a symlink, tell the user dev mode is not active and stop.
 
-### 3. Remove the symlink
+### 3. Restore the cache (hooks)
+
+Skip this step if the cache is not a symlink.
 
 ```bash
 rm ~/.claude/plugins/cache/kriswill/capture-plan/{VERSION}
-```
-
-### 4. Restore the backup
-
-```bash
 mv ~/.claude/plugins/cache/kriswill/capture-plan/{VERSION}.bak \
    ~/.claude/plugins/cache/kriswill/capture-plan/{VERSION}
+```
+
+If the `.bak` directory does not exist, tell the user to reinstall: `claude plugin install capture-plan@kriswill`
+
+### 4. Restore the marketplace (skills)
+
+Skip this step if the marketplace is not a symlink.
+
+```bash
+rm ~/.claude/plugins/marketplaces/kriswill
+mv ~/.claude/plugins/marketplaces/kriswill.bak \
+   ~/.claude/plugins/marketplaces/kriswill
 ```
 
 If the `.bak` directory does not exist, tell the user to reinstall: `claude plugin install capture-plan@kriswill`
@@ -39,6 +49,7 @@ If the `.bak` directory does not exist, tell the user to reinstall: `claude plug
 
 ```bash
 ls -la ~/.claude/plugins/cache/kriswill/capture-plan/
+ls -la ~/.claude/plugins/marketplaces/ | grep kriswill
 ```
 
-Print: "Dev mode disabled — plugin hooks now run from the cached release copy (v{VERSION})."
+Print: "Dev mode disabled — hooks and skills now run from the cached release copy (v{VERSION})."
