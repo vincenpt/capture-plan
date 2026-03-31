@@ -23,6 +23,7 @@ export interface TranscriptEntry {
   model?: string;
   message?: {
     role?: string;
+    model?: string;
     content?: string | ContentBlock[];
     usage?: {
       input_tokens?: number;
@@ -203,7 +204,8 @@ export function extractModel(
 ): string {
   const [start, end] = resolveRange(entries, startIdx, endIdx);
   for (let i = start; i <= end; i++) {
-    const model = entries[i].model;
+    // Real transcripts store model on the API response object (message.model)
+    const model = entries[i].message?.model ?? entries[i].model;
     if (typeof model === "string" && model) {
       // Strip date suffix: claude-opus-4-6-20250624 → claude-opus-4-6
       return model.replace(/-\d{8}$/, "");

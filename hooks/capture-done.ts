@@ -167,6 +167,15 @@ async function main(): Promise<void> {
     // Summarize with Haiku
     const { summary, tags: newTags } = await summarizeWithClaude(haikuInput, DONE_SYSTEM_PROMPT);
 
+    // Select the "Done" text for the Summary section body
+    // Prefer the last assistant message (Claude's exact completion text)
+    const doneText =
+      stats.lastAssistantText.length >= MIN_DONE_LENGTH
+        ? stats.lastAssistantText
+        : payloadMessage.length >= MIN_DONE_LENGTH
+          ? payloadMessage
+          : summary;
+
     // Build the summary note
     const { datetime, ampmTime } = getDateParts();
     const journalPath = getJournalPath(config);
@@ -192,16 +201,14 @@ async function main(): Promise<void> {
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-plan: "[[${state.plan_dir}/plan|${state.plan_title}]]"
+plan: "[[${state.plan_dir}/plan|${state.plan_title.replace(/"/g, '\\"')}]]"
 duration: "${duration}"${modelYaml}
 ---
 # Done: ${state.plan_title}
 
 ## Summary
 
-${summary}
-
-*Completed in ${duration} — ${stats.filesChanged.length} files changed*
+${doneText}
 
 ## Files Changed
 

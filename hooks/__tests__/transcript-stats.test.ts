@@ -15,18 +15,22 @@ import {
 function assistantEntry(
   overrides: Partial<TranscriptEntry> & { tools?: { name: string; id?: string }[] } = {},
 ): TranscriptEntry {
-  const { tools, ...rest } = overrides;
+  const { tools, model, message: msgOverride, ...rest } = overrides;
   const content = tools
     ? tools.map((t) => ({ type: "tool_use" as const, name: t.name, id: t.id ?? t.name }))
     : [{ type: "text" as const, text: "some response" }];
+  const message = msgOverride
+    ? { model, ...msgOverride }
+    : {
+        role: "assistant" as const,
+        model,
+        content,
+        usage: { input_tokens: 100, output_tokens: 50 },
+      };
   return {
     type: "assistant",
     timestamp: "2026-03-30T14:00:00.000Z",
-    message: {
-      role: "assistant",
-      content,
-      usage: { input_tokens: 100, output_tokens: 50 },
-    },
+    message,
     ...rest,
   };
 }

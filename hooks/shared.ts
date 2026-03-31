@@ -768,7 +768,7 @@ export function formatToolsNoteContent(opts: {
 
   return `---
 created: "[[${journalPath}|${datetime}]]"
-plan: "[[${planDir}/plan|${planTitle}]]"${project ? `\nproject: ${project}` : ""}
+plan: "[[${planDir}/plan|${planTitle.replace(/"/g, '\\"')}]]"${project ? `\nproject: ${project}` : ""}
 ${statsYaml}
 ---
 # Session Tools: ${planTitle}
