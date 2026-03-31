@@ -43,6 +43,7 @@ interface StopPayload {
   hook_event_name?: string;
   cwd?: string;
   transcript_path?: string;
+  last_assistant_message?: string;
   [key: string]: unknown;
 }
 
@@ -105,16 +106,28 @@ async function main(): Promise<void> {
 
     // Collect execution stats from transcript
     const stats = collectExecutionStats(entries, exitIdx);
-    if (stats.allAssistantText.length < MIN_DONE_LENGTH) {
+
+    // Use payload's last_assistant_message as fallback when transcript text is short
+    const payloadMessage = payload.last_assistant_message ?? "";
+    const narrativeText =
+      stats.allAssistantText.length >= MIN_DONE_LENGTH
+        ? stats.allAssistantText
+        : payloadMessage.length >= MIN_DONE_LENGTH
+          ? payloadMessage
+          : stats.allAssistantText || payloadMessage;
+
+    if (narrativeText.length < MIN_DONE_LENGTH) {
       debugLog(
-        `Done text too short (${stats.allAssistantText.length} chars), cleaning up\n`,
+        `Done text too short (transcript=${stats.allAssistantText.length}, payload=${payloadMessage.length} chars), keeping state for retry\n`,
         DEBUG_LOG,
       );
-      deleteSessionState(sessionId);
-      process.exit(0);
+      process.exit(0); // Keep state — next Stop event can retry
     }
 
-    debugLog(`Done text extracted (${stats.allAssistantText.length} chars)\n`, DEBUG_LOG);
+    debugLog(
+      `Done text extracted (transcript=${stats.allAssistantText.length}, payload=${payloadMessage.length} chars, using ${stats.allAssistantText.length >= MIN_DONE_LENGTH ? "transcript" : "payload"})\n`,
+      DEBUG_LOG,
+    );
 
     // Calculate execution duration
     const durationMs = Date.now() - new Date(state.timestamp).getTime();
@@ -129,7 +142,7 @@ async function main(): Promise<void> {
       ...stats.filesChanged.map((f) => `  - ${f}`),
       "",
       "Execution narrative:",
-      stats.allAssistantText,
+      narrativeText,
     ];
     let haikuInput = haikuParts.join("\n");
     if (haikuInput.length > MAX_HAIKU_INPUT) {
