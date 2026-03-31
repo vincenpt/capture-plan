@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   extractTitle,
   formatAmPm,
+  formatDuration,
   formatTagsYaml,
   getDatePartsFor,
   getJournalPathForDate,
@@ -440,6 +441,44 @@ describe("getDatePartsFor", () => {
     const date = new Date(2026, 5, 15, 0, 0);
     const parts = getDatePartsFor(date);
     expect(parts.ampmTime).toBe("12:00 AM");
+  });
+});
+
+// ---- getJournalPathForDate ----
+
+// ---- formatDuration ----
+
+describe("formatDuration", () => {
+  it("formats zero as 0s", () => {
+    expect(formatDuration(0)).toBe("0s");
+  });
+
+  it("formats sub-second as 0s", () => {
+    expect(formatDuration(999)).toBe("0s");
+  });
+
+  it("formats seconds only", () => {
+    expect(formatDuration(45_000)).toBe("45s");
+  });
+
+  it("formats minutes and seconds", () => {
+    expect(formatDuration(125_000)).toBe("2m 5s");
+  });
+
+  it("formats exact minutes without seconds", () => {
+    expect(formatDuration(300_000)).toBe("5m");
+  });
+
+  it("formats hours and minutes", () => {
+    expect(formatDuration(5_400_000)).toBe("1h 30m");
+  });
+
+  it("formats exact hours", () => {
+    expect(formatDuration(3_600_000)).toBe("1h");
+  });
+
+  it("formats 1m 13s like CLI output", () => {
+    expect(formatDuration(73_000)).toBe("1m 13s");
   });
 });
 

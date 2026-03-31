@@ -86,3 +86,49 @@ export function extractLastAssistantText(entries: TranscriptEntry[], afterIdx: n
   }
   return "";
 }
+
+const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
+export function collectChangedFiles(entries: TranscriptEntry[], afterIdx: number): string[] {
+  const files = new Set<string>();
+  for (let i = afterIdx + 1; i < entries.length; i++) {
+    for (const block of getContentBlocks(entries[i])) {
+      if (block.type !== "tool_use" || !block.name) continue;
+      if (!FILE_TOOLS.has(block.name)) continue;
+      const filePath = block.input?.file_path;
+      if (typeof filePath === "string" && filePath) {
+        files.add(filePath);
+      }
+    }
+  }
+  return [...files];
+}
+
+export function collectAllAssistantText(entries: TranscriptEntry[], afterIdx: number): string {
+  const texts: string[] = [];
+  for (let i = afterIdx + 1; i < entries.length; i++) {
+    for (const block of getContentBlocks(entries[i])) {
+      if (block.type === "text" && block.text) {
+        texts.push(block.text);
+      }
+    }
+  }
+  return texts.join("\n\n");
+}
+
+export interface ExecutionStats {
+  filesChanged: string[];
+  allAssistantText: string;
+  lastAssistantText: string;
+}
+
+export function collectExecutionStats(
+  entries: TranscriptEntry[],
+  afterIdx: number,
+): ExecutionStats {
+  return {
+    filesChanged: collectChangedFiles(entries, afterIdx),
+    allAssistantText: collectAllAssistantText(entries, afterIdx),
+    lastAssistantText: extractLastAssistantText(entries, afterIdx),
+  };
+}

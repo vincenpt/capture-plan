@@ -9,6 +9,7 @@ import {
   debugLog,
   deleteSessionState,
   findTranscriptPath,
+  formatDuration,
   formatTagsYaml,
   getDateParts,
   getJournalPath,
@@ -22,7 +23,7 @@ import {
   summarizeWithClaude,
 } from "./shared.ts";
 import {
-  extractLastAssistantText,
+  collectExecutionStats,
   findExitPlanIndex,
   hasExecutionAfter,
   parseTranscript,
@@ -32,8 +33,8 @@ const DEBUG_LOG = "/tmp/capture-done-debug.log";
 const STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
 const MIN_DONE_LENGTH = 50;
 
-const DONE_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given an execution summary from a coding session, output exactly two lines:
-Line 1: A 1-2 sentence summary (max 200 chars). Focus on what was built, changed, or fixed.
+const DONE_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given context about a completed coding session (plan title, duration, files changed, and execution narrative), output exactly two lines:
+Line 1: A 1-2 sentence summary (max 200 chars). Include concrete outcomes: what was built, changed, or fixed. Mention file count and duration if notable.
 Line 2: 1-2 lowercase kebab-case tags (comma-separated, no # prefix).
 Output ONLY these two lines.`;
 
@@ -102,18 +103,41 @@ async function main(): Promise<void> {
       process.exit(0); // Keep state — plan not yet executed
     }
 
-    // Extract the Done summary (last assistant text after execution)
-    const doneText = extractLastAssistantText(entries, exitIdx);
-    if (doneText.length < MIN_DONE_LENGTH) {
-      debugLog(`Done text too short (${doneText.length} chars), cleaning up\n`, DEBUG_LOG);
+    // Collect execution stats from transcript
+    const stats = collectExecutionStats(entries, exitIdx);
+    if (stats.allAssistantText.length < MIN_DONE_LENGTH) {
+      debugLog(
+        `Done text too short (${stats.allAssistantText.length} chars), cleaning up\n`,
+        DEBUG_LOG,
+      );
       deleteSessionState(sessionId);
       process.exit(0);
     }
 
-    debugLog(`Done text extracted (${doneText.length} chars)\n`, DEBUG_LOG);
+    debugLog(`Done text extracted (${stats.allAssistantText.length} chars)\n`, DEBUG_LOG);
+
+    // Calculate execution duration
+    const durationMs = Date.now() - new Date(state.timestamp).getTime();
+    const duration = formatDuration(durationMs);
+
+    // Build richer context for Haiku summarization
+    const MAX_HAIKU_INPUT = 8000;
+    const haikuParts = [
+      `Plan: ${state.plan_title}`,
+      `Duration: ${duration}`,
+      `Files changed (${stats.filesChanged.length}):`,
+      ...stats.filesChanged.map((f) => `  - ${f}`),
+      "",
+      "Execution narrative:",
+      stats.allAssistantText,
+    ];
+    let haikuInput = haikuParts.join("\n");
+    if (haikuInput.length > MAX_HAIKU_INPUT) {
+      haikuInput = haikuInput.slice(-MAX_HAIKU_INPUT);
+    }
 
     // Summarize with Haiku
-    const { summary, tags: newTags } = await summarizeWithClaude(doneText, DONE_SYSTEM_PROMPT);
+    const { summary, tags: newTags } = await summarizeWithClaude(haikuInput, DONE_SYSTEM_PROMPT);
 
     // Build the summary note
     const config = await loadConfig(payload.cwd);
@@ -132,9 +156,15 @@ async function main(): Promise<void> {
     const combinedTagsCsv = mergeTags(planTags, newTags);
     const tagsYaml = formatTagsYaml(combinedTagsCsv);
 
+    const fileList =
+      stats.filesChanged.length > 0
+        ? stats.filesChanged.map((f) => `- \`${f}\``).join("\n")
+        : "_No file changes recorded_";
+
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
 plan: "[[${state.plan_dir}/plan|${state.plan_title}]]"
+duration: "${duration}"
 summary: "${summary.replace(/"/g, '\\"')}"
 ---
 # Done: ${state.plan_title}
@@ -143,9 +173,11 @@ summary: "${summary.replace(/"/g, '\\"')}"
 
 ${summary}
 
-## Execution Report
+*Completed in ${duration} — ${stats.filesChanged.length} files changed*
 
-${doneText}
+## Files Changed
+
+${fileList}
 `;
 
     const escapedContent = noteContent.replace(/\n/g, "\\n");

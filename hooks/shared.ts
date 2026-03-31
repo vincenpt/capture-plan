@@ -209,6 +209,22 @@ export function getDateParts(): DateParts {
   return getDatePartsFor(new Date());
 }
 
+// ---- Duration Formatting ----
+
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) {
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (remainingMinutes > 0) return `${hours}h ${remainingMinutes}m`;
+  return `${hours}h`;
+}
+
 // ---- Haiku Summarization ----
 
 export async function summarizeWithClaude(

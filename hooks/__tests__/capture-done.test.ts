@@ -3,6 +3,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  collectAllAssistantText,
+  collectChangedFiles,
+  collectExecutionStats,
   EXECUTION_TOOLS,
   extractLastAssistantText,
   findExitPlanIndex,
@@ -395,5 +398,321 @@ describe("extractLastAssistantText", () => {
       { type: "human", message: { role: "user", content: "thanks" } },
     ];
     expect(extractLastAssistantText(entries, 0)).toBe("The answer");
+  });
+});
+
+// ---- collectChangedFiles ----
+
+describe("collectChangedFiles", () => {
+  it("extracts file paths from Edit tool_use blocks", () => {
+    const entries: TranscriptEntry[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              name: "Edit",
+              input: { file_path: "/src/app.ts" },
+            },
+          ],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              name: "Write",
+              input: { file_path: "/src/new.ts" },
+            },
+          ],
+        },
+      },
+    ];
+    expect(collectChangedFiles(entries, 0)).toEqual(["/src/app.ts", "/src/new.ts"]);
+  });
+
+  it("deduplicates files edited multiple times", () => {
+    const entries: TranscriptEntry[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              name: "Edit",
+              input: { file_path: "/src/app.ts" },
+            },
+          ],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              name: "Edit",
+              input: { file_path: "/src/app.ts" },
+            },
+          ],
+        },
+      },
+    ];
+    expect(collectChangedFiles(entries, 0)).toEqual(["/src/app.ts"]);
+  });
+
+  it("ignores Bash and Read tool blocks", () => {
+    const entries: TranscriptEntry[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              name: "Bash",
+              input: { command: "git status" },
+            },
+          ],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              name: "Read",
+              input: { file_path: "/src/app.ts" },
+            },
+          ],
+        },
+      },
+    ];
+    expect(collectChangedFiles(entries, 0)).toEqual([]);
+  });
+
+  it("returns empty array when no file tools after index", () => {
+    const entries: TranscriptEntry[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
+        },
+      },
+    ];
+    expect(collectChangedFiles(entries, 0)).toEqual([]);
+  });
+
+  it("only checks entries after afterIdx", () => {
+    const entries: TranscriptEntry[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              name: "Edit",
+              input: { file_path: "/before.ts" },
+            },
+          ],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
+        },
+      },
+    ];
+    expect(collectChangedFiles(entries, 1)).toEqual([]);
+  });
+});
+
+// ---- collectAllAssistantText ----
+
+describe("collectAllAssistantText", () => {
+  it("collects text from ALL assistant entries after index", () => {
+    const entries: TranscriptEntry[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Editing files now" }],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "All done" }],
+        },
+      },
+    ];
+    expect(collectAllAssistantText(entries, 0)).toBe("Editing files now\n\nAll done");
+  });
+
+  it("skips human entries", () => {
+    const entries: TranscriptEntry[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Working" }],
+        },
+      },
+      { type: "human", message: { role: "user", content: "ok" } },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Done" }],
+        },
+      },
+    ];
+    expect(collectAllAssistantText(entries, 0)).toBe("Working\n\nDone");
+  });
+
+  it("returns empty string when no text blocks after index", () => {
+    const entries: TranscriptEntry[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "Edit" }],
+        },
+      },
+    ];
+    expect(collectAllAssistantText(entries, 0)).toBe("");
+  });
+
+  it("only searches after the given index", () => {
+    const entries: TranscriptEntry[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Before" }],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
+        },
+      },
+    ];
+    expect(collectAllAssistantText(entries, 1)).toBe("");
+  });
+});
+
+// ---- collectExecutionStats ----
+
+describe("collectExecutionStats", () => {
+  it("returns all fields populated", () => {
+    const entries: TranscriptEntry[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Editing now" },
+            {
+              type: "tool_use",
+              name: "Edit",
+              input: { file_path: "/src/app.ts" },
+            },
+          ],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "All done" }],
+        },
+      },
+    ];
+    const stats = collectExecutionStats(entries, 0);
+    expect(stats.filesChanged).toEqual(["/src/app.ts"]);
+    expect(stats.allAssistantText).toBe("Editing now\n\nAll done");
+    expect(stats.lastAssistantText).toBe("All done");
+  });
+
+  it("handles empty transcript after ExitPlanMode", () => {
+    const entries: TranscriptEntry[] = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "ExitPlanMode" }],
+        },
+      },
+    ];
+    const stats = collectExecutionStats(entries, 0);
+    expect(stats.filesChanged).toEqual([]);
+    expect(stats.allAssistantText).toBe("");
+    expect(stats.lastAssistantText).toBe("");
   });
 });
