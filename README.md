@@ -1,5 +1,7 @@
 # capture-plan
 
+> **Warning:** This project is under heavy development churn. Interfaces and features are evolving rapidly and may be unstable from version to version.
+
 A Claude Code plugin that captures plans and execution summaries to an Obsidian vault.
 
 ## What it does
