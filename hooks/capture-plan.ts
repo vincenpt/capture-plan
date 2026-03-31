@@ -7,6 +7,8 @@ import {
   appendToJournal,
   debugLog,
   extractTitle,
+  findTranscriptPath,
+  formatStatsInserts,
   formatTagsYaml,
   getDateParts,
   getJournalPath,
@@ -24,6 +26,12 @@ import {
   toSlug,
   writeSessionState,
 } from "./shared.ts";
+import {
+  collectTranscriptStats,
+  findExitPlanIndex,
+  parseTranscript,
+  type TranscriptStats,
+} from "./transcript.ts";
 
 const DEBUG_LOG = "/tmp/capture-plan-debug.log";
 
@@ -106,6 +114,25 @@ async function main(): Promise<void> {
       DEBUG_LOG,
     );
 
+    // Collect planning-phase stats from transcript
+    let stats: TranscriptStats | null = null;
+    try {
+      const transcriptPath = findTranscriptPath(sessionId, payload.cwd);
+      if (transcriptPath) {
+        const entries = parseTranscript(transcriptPath);
+        const exitIdx = findExitPlanIndex(entries);
+        if (exitIdx >= 0) {
+          stats = collectTranscriptStats(entries, 0, exitIdx);
+          debugLog(
+            `Transcript stats collected: ${stats.totalToolCalls} tool calls, model=${stats.model}\n`,
+            DEBUG_LOG,
+          );
+        }
+      }
+    } catch (err) {
+      debugLog(`Failed to collect transcript stats: ${err}\n`, DEBUG_LOG);
+    }
+
     const vaultPath = getVaultPath(config.vault);
     const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null;
     const counter = dateDirAbsolute ? nextCounter(dateDirAbsolute) : 1;
@@ -119,13 +146,15 @@ async function main(): Promise<void> {
     const project = getProjectName(payload.cwd);
     const tagsYaml = formatTagsYaml(newTags);
 
+    const { statsYaml, addendumSection } = formatStatsInserts(stats);
+
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-session: "[[Sessions/${shortSessionId(sessionId)}]]"
+session: "[[Sessions/${shortSessionId(sessionId)}]]"${statsYaml}
 ---
 # ${title}
 
-${stripTitleLine(planContent)}
+${stripTitleLine(planContent)}${addendumSection}
 `;
 
     const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${ampmTime}]] | ${summary} |`;
@@ -153,6 +182,7 @@ ${stripTitleLine(planContent)}
       journal_path: journalPath,
       project: getProjectName(payload.cwd),
       tags: newTags,
+      model: stats?.model,
     };
     await writeSessionState(sessionId, state);
 

@@ -4,6 +4,7 @@
 import { appendFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import type { TranscriptStats } from "./transcript.ts";
 
 // ---- Types ----
 
@@ -23,6 +24,7 @@ export interface SessionState {
   journal_path?: string;
   project?: string;
   tags?: string;
+  model?: string;
 }
 
 export interface PlanFrontmatter {
@@ -510,6 +512,59 @@ export function parsePlanFrontmatter(content: string): PlanFrontmatter {
   }
 
   return result;
+}
+
+// ---- Stats Formatting ----
+
+export function formatNumber(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
+export function formatStatsYaml(stats: TranscriptStats): string {
+  const lines: string[] = [];
+  lines.push(`model: ${stats.model}`);
+  lines.push(`duration: "${formatDuration(stats.durationMs)}"`);
+  lines.push("tokens:");
+  lines.push(`  input: ${stats.tokens.input}`);
+  lines.push(`  output: ${stats.tokens.output}`);
+  lines.push(`  cache_read: ${stats.tokens.cache_read}`);
+  lines.push(`  cache_create: ${stats.tokens.cache_create}`);
+  lines.push(`subagents: ${stats.subagentCount}`);
+  lines.push(`tools_used: ${stats.totalToolCalls}`);
+  if (stats.mcpServers.length > 0) {
+    lines.push("mcp_servers:");
+    for (const srv of stats.mcpServers) {
+      lines.push(`  - ${srv.name}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+export function formatToolUseAddendum(stats: TranscriptStats): string {
+  if (stats.tools.length === 0) return "";
+  const lines: string[] = [];
+  lines.push("## Session Stats");
+  lines.push("");
+  lines.push("| Tool | Calls | Errors |");
+  lines.push("|------|------:|-------:|");
+  for (const tool of stats.tools) {
+    lines.push(`| ${tool.name} | ${tool.calls} | ${tool.errors} |`);
+  }
+  lines.push("");
+  lines.push(
+    `**${formatNumber(stats.totalToolCalls)} tool calls** | **${formatNumber(stats.tokens.input)} in / ${formatNumber(stats.tokens.output)} out tokens** | **${stats.totalErrors} errors**`,
+  );
+  return lines.join("\n");
+}
+
+export function formatStatsInserts(stats: TranscriptStats | null): {
+  statsYaml: string;
+  addendumSection: string;
+} {
+  const statsYaml = stats ? `\n${formatStatsYaml(stats)}` : "";
+  const addendum = stats ? formatToolUseAddendum(stats) : "";
+  const addendumSection = addendum ? `\n\n---\n\n${addendum}\n` : "";
+  return { statsYaml, addendumSection };
 }
 
 // ---- Transcript ----

@@ -3,7 +3,10 @@ import {
   extractTitle,
   formatAmPm,
   formatDuration,
+  formatNumber,
+  formatStatsYaml,
   formatTagsYaml,
+  formatToolUseAddendum,
   getDatePartsFor,
   getJournalPathForDate,
   getProjectName,
@@ -14,6 +17,7 @@ import {
   stripTitleLine,
   toSlug,
 } from "../shared.ts";
+import type { TranscriptStats } from "../transcript.ts";
 
 // ---- extractTitle ----
 
@@ -503,5 +507,108 @@ describe("getJournalPathForDate", () => {
     const customConfig = { plan_path: "Claude/Plans", journal_path: "MyJournal" };
     const date = new Date(2026, 2, 29, 14, 30);
     expect(getJournalPathForDate(customConfig, date)).toBe("MyJournal/2026/03-March/29-Sunday");
+  });
+});
+
+// ---- formatNumber ----
+
+describe("formatNumber", () => {
+  it("formats small numbers without commas", () => {
+    expect(formatNumber(42)).toBe("42");
+  });
+
+  it("formats thousands with commas", () => {
+    expect(formatNumber(1234)).toBe("1,234");
+  });
+
+  it("formats large numbers with commas", () => {
+    expect(formatNumber(1234567)).toBe("1,234,567");
+  });
+
+  it("formats zero", () => {
+    expect(formatNumber(0)).toBe("0");
+  });
+});
+
+// ---- formatStatsYaml ----
+
+describe("formatStatsYaml", () => {
+  const baseStats: TranscriptStats = {
+    model: "claude-opus-4-6",
+    durationMs: 300_000,
+    tokens: { input: 12500, output: 3200, cache_read: 8000, cache_create: 1500 },
+    subagentCount: 2,
+    tools: [
+      { name: "Read", calls: 5, errors: 0 },
+      { name: "Edit", calls: 3, errors: 1 },
+    ],
+    mcpServers: [{ name: "context-mode", tools: ["ctx_search"], calls: 2 }],
+    totalToolCalls: 10,
+    totalErrors: 1,
+  };
+
+  it("formats all stats fields", () => {
+    const yaml = formatStatsYaml(baseStats);
+    expect(yaml).toContain("model: claude-opus-4-6");
+    expect(yaml).toContain('duration: "5m"');
+    expect(yaml).toContain("tokens:");
+    expect(yaml).toContain("  input: 12500");
+    expect(yaml).toContain("  output: 3200");
+    expect(yaml).toContain("  cache_read: 8000");
+    expect(yaml).toContain("  cache_create: 1500");
+    expect(yaml).toContain("subagents: 2");
+    expect(yaml).toContain("tools_used: 10");
+    expect(yaml).toContain("mcp_servers:");
+    expect(yaml).toContain("  - context-mode");
+  });
+
+  it("omits mcp_servers when empty", () => {
+    const stats = { ...baseStats, mcpServers: [] };
+    const yaml = formatStatsYaml(stats);
+    expect(yaml).not.toContain("mcp_servers:");
+  });
+
+  it("handles zero tokens", () => {
+    const stats = {
+      ...baseStats,
+      tokens: { input: 0, output: 0, cache_read: 0, cache_create: 0 },
+    };
+    const yaml = formatStatsYaml(stats);
+    expect(yaml).toContain("  input: 0");
+    expect(yaml).toContain("  output: 0");
+  });
+});
+
+// ---- formatToolUseAddendum ----
+
+describe("formatToolUseAddendum", () => {
+  const baseStats: TranscriptStats = {
+    model: "claude-opus-4-6",
+    durationMs: 300_000,
+    tokens: { input: 12500, output: 3200, cache_read: 0, cache_create: 0 },
+    subagentCount: 0,
+    tools: [
+      { name: "Read", calls: 5, errors: 0 },
+      { name: "Bash", calls: 3, errors: 1 },
+    ],
+    mcpServers: [],
+    totalToolCalls: 8,
+    totalErrors: 1,
+  };
+
+  it("renders markdown table with tool breakdown", () => {
+    const addendum = formatToolUseAddendum(baseStats);
+    expect(addendum).toContain("## Session Stats");
+    expect(addendum).toContain("| Tool | Calls | Errors |");
+    expect(addendum).toContain("| Read | 5 | 0 |");
+    expect(addendum).toContain("| Bash | 3 | 1 |");
+    expect(addendum).toContain("**8 tool calls**");
+    expect(addendum).toContain("**12,500 in / 3,200 out tokens**");
+    expect(addendum).toContain("**1 errors**");
+  });
+
+  it("returns empty string when no tools", () => {
+    const stats = { ...baseStats, tools: [] };
+    expect(formatToolUseAddendum(stats)).toBe("");
   });
 });

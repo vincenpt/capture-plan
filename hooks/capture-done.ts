@@ -10,6 +10,7 @@ import {
   deleteSessionState,
   findTranscriptPath,
   formatDuration,
+  formatStatsInserts,
   formatTagsYaml,
   getDateParts,
   getJournalPath,
@@ -24,9 +25,11 @@ import {
 } from "./shared.ts";
 import {
   collectExecutionStats,
+  collectTranscriptStats,
   findExitPlanIndex,
   hasExecutionAfter,
   parseTranscript,
+  type TranscriptStats,
 } from "./transcript.ts";
 
 const DEBUG_LOG = "/tmp/capture-done-debug.log";
@@ -107,6 +110,18 @@ async function main(): Promise<void> {
     // Collect execution stats from transcript
     const stats = collectExecutionStats(entries, exitIdx);
 
+    // Collect detailed transcript stats for the execution phase
+    let transcriptStats: TranscriptStats | null = null;
+    try {
+      transcriptStats = collectTranscriptStats(entries, exitIdx);
+      debugLog(
+        `Execution stats: ${transcriptStats.totalToolCalls} tool calls, model=${transcriptStats.model}\n`,
+        DEBUG_LOG,
+      );
+    } catch (err) {
+      debugLog(`Failed to collect transcript stats: ${err}\n`, DEBUG_LOG);
+    }
+
     // Use payload's last_assistant_message as fallback when transcript text is short
     const payloadMessage = payload.last_assistant_message ?? "";
     const narrativeText =
@@ -174,11 +189,13 @@ async function main(): Promise<void> {
         ? stats.filesChanged.map((f) => `- \`${f}\``).join("\n")
         : "_No file changes recorded_";
 
+    const { statsYaml, addendumSection } = formatStatsInserts(transcriptStats);
+
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
 plan: "[[${state.plan_dir}/plan|${state.plan_title}]]"
 duration: "${duration}"
-summary: "${summary.replace(/"/g, '\\"')}"
+summary: "${summary.replace(/"/g, '\\"')}"${statsYaml}
 ---
 # Done: ${state.plan_title}
 
@@ -190,7 +207,7 @@ ${summary}
 
 ## Files Changed
 
-${fileList}
+${fileList}${addendumSection}
 `;
 
     const escapedContent = noteContent.replace(/\n/g, "\\n");
