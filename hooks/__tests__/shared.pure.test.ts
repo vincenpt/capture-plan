@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
+  computeContextPct,
+  contextCapLabel,
   extractTitle,
   formatAmPm,
   formatDuration,
@@ -16,6 +18,7 @@ import {
   mergeTranscriptStats,
   padCounter,
   parsePlanFrontmatter,
+  resolveContextCap,
   shortSessionId,
   stripTitleLine,
   toSlug,
@@ -533,6 +536,74 @@ describe("formatNumber", () => {
   });
 });
 
+// ---- contextCapLabel ----
+
+describe("contextCapLabel", () => {
+  it("formats 200K", () => {
+    expect(contextCapLabel(200_000)).toBe("200K");
+  });
+
+  it("formats 1M", () => {
+    expect(contextCapLabel(1_000_000)).toBe("1M");
+  });
+
+  it("formats 2M", () => {
+    expect(contextCapLabel(2_000_000)).toBe("2M");
+  });
+
+  it("formats 500K", () => {
+    expect(contextCapLabel(500_000)).toBe("500K");
+  });
+
+  it("rounds to nearest K", () => {
+    expect(contextCapLabel(128_000)).toBe("128K");
+  });
+});
+
+// ---- resolveContextCap ----
+
+describe("resolveContextCap", () => {
+  it("returns config value when provided", () => {
+    expect(resolveContextCap(50000, 1_000_000)).toBe(1_000_000);
+  });
+
+  it("auto-detects 1M when peak > 200K", () => {
+    expect(resolveContextCap(250_000)).toBe(1_000_000);
+  });
+
+  it("defaults to 200K when peak is within standard range", () => {
+    expect(resolveContextCap(100_000)).toBe(200_000);
+  });
+
+  it("config takes priority over auto-detect", () => {
+    expect(resolveContextCap(250_000, 500_000)).toBe(500_000);
+  });
+});
+
+// ---- computeContextPct ----
+
+describe("computeContextPct", () => {
+  it("computes percentage from input + output", () => {
+    const tokens = { input: 50_000, output: 10_000, cache_read: 0, cache_create: 0 };
+    expect(computeContextPct(tokens, 200_000)).toBe(30);
+  });
+
+  it("rounds to nearest integer", () => {
+    const tokens = { input: 33_333, output: 0, cache_read: 0, cache_create: 0 };
+    expect(computeContextPct(tokens, 200_000)).toBe(17);
+  });
+
+  it("returns 0 when cap is 0", () => {
+    const tokens = { input: 50_000, output: 10_000, cache_read: 0, cache_create: 0 };
+    expect(computeContextPct(tokens, 0)).toBe(0);
+  });
+
+  it("handles large context windows", () => {
+    const tokens = { input: 100_000, output: 50_000, cache_read: 0, cache_create: 0 };
+    expect(computeContextPct(tokens, 1_000_000)).toBe(15);
+  });
+});
+
 // ---- formatStatsYaml ----
 
 describe("formatStatsYaml", () => {
@@ -540,6 +611,7 @@ describe("formatStatsYaml", () => {
     model: "claude-opus-4-6",
     durationMs: 300_000,
     tokens: { input: 12500, output: 3200, cache_read: 8000, cache_create: 1500 },
+    peakTurnContext: 15000,
     subagentCount: 2,
     tools: [
       { name: "Read", calls: 5, errors: 0 },
@@ -550,17 +622,23 @@ describe("formatStatsYaml", () => {
     totalErrors: 1,
   };
 
-  it("formats all stats fields", () => {
+  it("formats all stats fields including context", () => {
     const yaml = formatStatsYaml(baseStats);
-    expect(yaml).toContain("model: claude-opus-4-6");
+    expect(yaml).toContain("model: claude-opus-4-6 (200K)");
     expect(yaml).toContain('duration: "5m"');
     expect(yaml).toContain("tokens_in: 12500");
     expect(yaml).toContain("tokens_out: 3200");
+    expect(yaml).toContain("context_pct:");
     expect(yaml).toContain("subagents: 2");
     expect(yaml).toContain("tools_used: 10");
     expect(yaml).toContain("total_errors: 1");
     expect(yaml).toContain("mcp_servers:");
     expect(yaml).toContain("  - context-mode");
+  });
+
+  it("uses explicit contextCap when provided", () => {
+    const yaml = formatStatsYaml(baseStats, 1_000_000);
+    expect(yaml).toContain("model: claude-opus-4-6 (1M)");
   });
 
   it("omits mcp_servers when empty", () => {
@@ -577,24 +655,35 @@ describe("formatStatsYaml", () => {
     const yaml = formatStatsYaml(stats);
     expect(yaml).toContain("tokens_in: 0");
     expect(yaml).toContain("tokens_out: 0");
+    expect(yaml).toContain("context_pct: 0");
   });
 });
 
 // ---- formatModelYaml ----
 
 describe("formatModelYaml", () => {
-  it("returns model line with leading newline", () => {
-    const stats: TranscriptStats = {
-      model: "claude-opus-4-6",
-      durationMs: 0,
-      tokens: { input: 0, output: 0, cache_read: 0, cache_create: 0 },
-      subagentCount: 0,
-      tools: [],
-      mcpServers: [],
-      totalToolCalls: 0,
-      totalErrors: 0,
-    };
-    expect(formatModelYaml(stats)).toBe("\nmodel: claude-opus-4-6");
+  const stats: TranscriptStats = {
+    model: "claude-opus-4-6",
+    durationMs: 0,
+    tokens: { input: 50000, output: 10000, cache_read: 0, cache_create: 0 },
+    peakTurnContext: 50000,
+    subagentCount: 0,
+    tools: [],
+    mcpServers: [],
+    totalToolCalls: 0,
+    totalErrors: 0,
+  };
+
+  it("returns model with context cap label and context_pct", () => {
+    const yaml = formatModelYaml(stats);
+    expect(yaml).toContain("model: claude-opus-4-6 (200K)");
+    expect(yaml).toContain("context_pct: 30"); // (50000+10000)/200000 = 30%
+  });
+
+  it("uses explicit contextCap when provided", () => {
+    const yaml = formatModelYaml(stats, 1_000_000);
+    expect(yaml).toContain("model: claude-opus-4-6 (1M)");
+    expect(yaml).toContain("context_pct: 6"); // (50000+10000)/1000000 = 6%
   });
 
   it("returns empty string for null", () => {
@@ -629,6 +718,7 @@ describe("mergeTranscriptStats", () => {
     model: "claude-opus-4-6",
     durationMs: 60_000,
     tokens: { input: 5000, output: 1000, cache_read: 3000, cache_create: 500 },
+    peakTurnContext: 8000,
     subagentCount: 1,
     tools: [
       { name: "Read", calls: 5, errors: 0 },
@@ -643,6 +733,7 @@ describe("mergeTranscriptStats", () => {
     model: "claude-opus-4-6",
     durationMs: 120_000,
     tokens: { input: 10000, output: 4000, cache_read: 7000, cache_create: 1000 },
+    peakTurnContext: 15000,
     subagentCount: 2,
     tools: [
       { name: "Read", calls: 3, errors: 0 },
@@ -698,6 +789,11 @@ describe("mergeTranscriptStats", () => {
     const merged = mergeTranscriptStats(aUnknown, execStats);
     expect(merged.model).toBe("claude-opus-4-6");
   });
+
+  it("takes max of peakTurnContext", () => {
+    const merged = mergeTranscriptStats(planStats, execStats);
+    expect(merged.peakTurnContext).toBe(15000);
+  });
 });
 
 // ---- formatToolsNoteContent ----
@@ -714,6 +810,7 @@ describe("formatToolsNoteContent", () => {
     model: "claude-opus-4-6",
     durationMs: 60_000,
     tokens: { input: 5000, output: 1000, cache_read: 0, cache_create: 0 },
+    peakTurnContext: 5000,
     subagentCount: 0,
     tools: [{ name: "Read", calls: 3, errors: 0 }],
     mcpServers: [],
@@ -725,6 +822,7 @@ describe("formatToolsNoteContent", () => {
     model: "claude-opus-4-6",
     durationMs: 120_000,
     tokens: { input: 10000, output: 4000, cache_read: 0, cache_create: 0 },
+    peakTurnContext: 10000,
     subagentCount: 1,
     tools: [
       { name: "Edit", calls: 5, errors: 1 },
@@ -808,5 +906,26 @@ describe("formatToolsNoteContent", () => {
       execStats: null,
     });
     expect(content).toContain("# Session Tools: My Plan");
+  });
+
+  it("includes context usage line in Combined section", () => {
+    const content = formatToolsNoteContent({
+      ...baseOpts,
+      planStats,
+      execStats,
+    });
+    // Combined: (15000+5000) / 200000 = 10%
+    expect(content).toContain("**Context:");
+    expect(content).toContain("(10%)");
+  });
+
+  it("uses explicit contextCap when provided", () => {
+    const content = formatToolsNoteContent({
+      ...baseOpts,
+      planStats,
+      execStats,
+      contextCap: 1_000_000,
+    });
+    expect(content).toContain("model: claude-opus-4-6 (1M)");
   });
 });

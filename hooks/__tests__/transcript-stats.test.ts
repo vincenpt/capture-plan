@@ -7,6 +7,7 @@ import {
   countSubagents,
   extractModel,
   getUserContentBlocks,
+  peakTurnContext,
   type TranscriptEntry,
 } from "../transcript.ts";
 
@@ -260,6 +261,77 @@ describe("aggregateTokens", () => {
   });
 });
 
+// ---- peakTurnContext ----
+
+describe("peakTurnContext", () => {
+  it("returns the max single-turn context across entries", () => {
+    const entries = [
+      assistantEntry({
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "a" }],
+          usage: { input_tokens: 1000, output_tokens: 200, cache_read_input_tokens: 500 },
+        },
+      }),
+      humanEntry(),
+      assistantEntry({
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "b" }],
+          usage: { input_tokens: 2000, output_tokens: 300, cache_read_input_tokens: 100 },
+        },
+      }),
+    ];
+    // Turn 0: 1000 + 500 = 1500, Turn 2: 2000 + 100 = 2100
+    expect(peakTurnContext(entries)).toBe(2100);
+  });
+
+  it("counts input_tokens without cache when cache_read is missing", () => {
+    const entries = [
+      assistantEntry({
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "a" }],
+          usage: { input_tokens: 5000, output_tokens: 100 },
+        },
+      }),
+    ];
+    expect(peakTurnContext(entries)).toBe(5000);
+  });
+
+  it("returns 0 for empty entries", () => {
+    expect(peakTurnContext([])).toBe(0);
+  });
+
+  it("returns 0 when no usage data", () => {
+    const entries = [
+      assistantEntry({ message: { role: "assistant", content: [{ type: "text", text: "a" }] } }),
+    ];
+    expect(peakTurnContext(entries)).toBe(0);
+  });
+
+  it("respects range parameters", () => {
+    const entries = [
+      assistantEntry({
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "a" }],
+          usage: { input_tokens: 5000, output_tokens: 100 },
+        },
+      }),
+      humanEntry(),
+      assistantEntry({
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "b" }],
+          usage: { input_tokens: 1000, output_tokens: 50 },
+        },
+      }),
+    ];
+    expect(peakTurnContext(entries, 2, 2)).toBe(1000);
+  });
+});
+
 // ---- countSubagents ----
 
 describe("countSubagents", () => {
@@ -466,6 +538,7 @@ describe("collectTranscriptStats", () => {
     expect(stats.tokens.output).toBe(850);
     expect(stats.tokens.cache_read).toBe(200);
     expect(stats.tokens.cache_create).toBe(0);
+    expect(stats.peakTurnContext).toBe(1200); // 1000 + 200 cache_read
     expect(stats.subagentCount).toBe(1);
     expect(stats.totalToolCalls).toBe(3);
     expect(stats.totalErrors).toBe(0);
@@ -524,6 +597,7 @@ describe("collectTranscriptStats", () => {
     expect(stats.model).toBe("unknown");
     expect(stats.durationMs).toBe(0);
     expect(stats.tokens.input).toBe(0);
+    expect(stats.peakTurnContext).toBe(0);
     expect(stats.subagentCount).toBe(0);
     expect(stats.totalToolCalls).toBe(0);
     expect(stats.totalErrors).toBe(0);

@@ -100,7 +100,13 @@ plan_path = "Claude/Plans"
 
 # Base path for journal entries inside the vault
 journal_path = "Journal"
+
+# Context window cap in tokens (auto-detected, override if needed)
+# Standard: 200000, Max/Enterprise: 1000000
+# context_cap = 1000000
 ```
+
+The `context_cap` setting controls the context window size shown in note frontmatter (e.g., `model: claude-opus-4-6 (1M)`). By default, the plugin assumes 200K and auto-detects 1M when a single turn exceeds 200K tokens. Set this explicitly if you're on Claude Max or Enterprise and want it to always show 1M.
 
 ## Skills
 

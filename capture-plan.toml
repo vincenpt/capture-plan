@@ -9,3 +9,7 @@ plan_path = "Claude/Plans"
 
 # Base path for journal entries inside the vault
 journal_path = "Journal"
+
+# Context window cap in tokens (auto-detected, override if needed)
+# Standard: 200000, Max/Enterprise: 1000000
+# context_cap = 1000000

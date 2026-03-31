@@ -58,6 +58,7 @@ export interface TranscriptStats {
   model: string;
   durationMs: number;
   tokens: TokenUsage;
+  peakTurnContext: number;
   subagentCount: number;
   tools: ToolUseRecord[];
   mcpServers: McpServerInfo[];
@@ -286,6 +287,23 @@ export function aggregateTokens(
   return totals;
 }
 
+export function peakTurnContext(
+  entries: TranscriptEntry[],
+  startIdx?: number,
+  endIdx?: number,
+): number {
+  const [start, end] = resolveRange(entries, startIdx, endIdx);
+  let peak = 0;
+  for (let i = start; i <= end; i++) {
+    if (entries[i].type !== "assistant") continue;
+    const usage = entries[i].message?.usage;
+    if (!usage) continue;
+    const turnContext = (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
+    if (turnContext > peak) peak = turnContext;
+  }
+  return peak;
+}
+
 export function countSubagents(
   entries: TranscriptEntry[],
   startIdx?: number,
@@ -395,6 +413,7 @@ export function collectTranscriptStats(
   const model = extractModel(entries, startIdx, endIdx);
   const durationMs = computeDurationMs(entries, startIdx, endIdx);
   const tokens = aggregateTokens(entries, startIdx, endIdx);
+  const peak = peakTurnContext(entries, startIdx, endIdx);
   const subagentCount = countSubagents(entries, startIdx, endIdx);
   const { tools, mcpServers, totalCalls, totalErrors } = collectToolUsage(
     entries,
@@ -406,6 +425,7 @@ export function collectTranscriptStats(
     model,
     durationMs,
     tokens,
+    peakTurnContext: peak,
     subagentCount,
     tools,
     mcpServers,

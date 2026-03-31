@@ -20,6 +20,7 @@ import {
   loadConfig,
   mergeTags,
   mergeTagsOnDailyNote,
+  resolveContextCap,
   runObsidian,
   scanForVaultState,
   summarizeWithClaude,
@@ -192,7 +193,8 @@ async function main(): Promise<void> {
         ? stats.filesChanged.map((f) => `- \`${f}\``).join("\n")
         : "_No file changes recorded_";
 
-    const modelYaml = formatModelYaml(transcriptStats);
+    const contextCap = resolveContextCap(transcriptStats?.peakTurnContext ?? 0, config.context_cap);
+    const modelYaml = formatModelYaml(transcriptStats, contextCap);
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
@@ -234,6 +236,7 @@ ${fileList}
       journalPath,
       datetime,
       project,
+      contextCap,
     });
 
     if (toolsNoteContent) {

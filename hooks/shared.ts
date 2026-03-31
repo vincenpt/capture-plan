@@ -4,7 +4,7 @@
 import { appendFileSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import type { McpServerInfo, ToolUseRecord, TranscriptStats } from "./transcript.ts";
+import type { McpServerInfo, TokenUsage, ToolUseRecord, TranscriptStats } from "./transcript.ts";
 
 // ---- Types ----
 
@@ -12,6 +12,7 @@ export interface Config {
   vault?: string;
   plan_path: string;
   journal_path: string;
+  context_cap?: number;
 }
 
 export interface SessionState {
@@ -80,10 +81,13 @@ export async function loadConfig(cwd?: string): Promise<Config> {
   const projectPath = cwd ? join(cwd, ".claude", "capture-plan.toml") : null;
   const project = projectPath ? await loadToml(projectPath) : null;
   const merged = { ...pluginDefault, ...userGlobal, ...project };
+  const rawCap = merged.context_cap;
+  const contextCap = typeof rawCap === "number" && rawCap > 0 ? rawCap : undefined;
   return {
     vault: (merged.vault as string) || undefined,
     plan_path: (merged.plan_path as string) || DEFAULT_CONFIG.plan_path,
     journal_path: (merged.journal_path as string) || DEFAULT_CONFIG.journal_path,
+    context_cap: contextCap,
   };
 }
 
@@ -623,18 +627,41 @@ export function parsePlanFrontmatter(content: string): PlanFrontmatter {
   return result;
 }
 
+// ---- Context Window ----
+
+const DEFAULT_CONTEXT_CAP = 200_000;
+
+export function contextCapLabel(cap: number): string {
+  if (cap >= 1_000_000 && cap % 1_000_000 === 0) return `${cap / 1_000_000}M`;
+  return `${Math.round(cap / 1_000)}K`;
+}
+
+export function resolveContextCap(peakContext: number, configCap?: number): number {
+  if (configCap && configCap > 0) return configCap;
+  if (peakContext > DEFAULT_CONTEXT_CAP) return 1_000_000;
+  return DEFAULT_CONTEXT_CAP;
+}
+
+export function computeContextPct(tokens: TokenUsage, contextCap: number): number {
+  if (contextCap <= 0) return 0;
+  return Math.round(((tokens.input + tokens.output) / contextCap) * 100);
+}
+
 // ---- Stats Formatting ----
 
 export function formatNumber(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-export function formatStatsYaml(stats: TranscriptStats): string {
+export function formatStatsYaml(stats: TranscriptStats, contextCap?: number): string {
   const lines: string[] = [];
-  lines.push(`model: ${stats.model}`);
+  const cap = contextCap ?? resolveContextCap(stats.peakTurnContext);
+  const capSuffix = ` (${contextCapLabel(cap)})`;
+  lines.push(`model: ${stats.model}${capSuffix}`);
   lines.push(`duration: "${formatDuration(stats.durationMs)}"`);
   lines.push(`tokens_in: ${stats.tokens.input}`);
   lines.push(`tokens_out: ${stats.tokens.output}`);
+  lines.push(`context_pct: ${computeContextPct(stats.tokens, cap)}`);
   lines.push(`subagents: ${stats.subagentCount}`);
   lines.push(`tools_used: ${stats.totalToolCalls}`);
   lines.push(`total_errors: ${stats.totalErrors}`);
@@ -647,8 +674,12 @@ export function formatStatsYaml(stats: TranscriptStats): string {
   return lines.join("\n");
 }
 
-export function formatModelYaml(stats: TranscriptStats | null): string {
-  return stats?.model ? `\nmodel: ${stats.model}` : "";
+export function formatModelYaml(stats: TranscriptStats | null, contextCap?: number): string {
+  if (!stats?.model) return "";
+  const cap = contextCap ?? resolveContextCap(stats.peakTurnContext);
+  const capSuffix = ` (${contextCapLabel(cap)})`;
+  const pct = computeContextPct(stats.tokens, cap);
+  return `\nmodel: ${stats.model}${capSuffix}\ncontext_pct: ${pct}`;
 }
 
 export function formatToolTable(tools: ToolUseRecord[]): string {
@@ -710,6 +741,7 @@ export function mergeTranscriptStats(a: TranscriptStats, b: TranscriptStats): Tr
     model,
     durationMs,
     tokens,
+    peakTurnContext: Math.max(a.peakTurnContext, b.peakTurnContext),
     subagentCount: a.subagentCount + b.subagentCount,
     tools,
     mcpServers,
@@ -726,8 +758,10 @@ export function formatToolsNoteContent(opts: {
   journalPath: string;
   datetime: string;
   project?: string;
+  contextCap?: number;
 }): string | null {
-  const { planStats, execStats, planTitle, planDir, journalPath, datetime, project } = opts;
+  const { planStats, execStats, planTitle, planDir, journalPath, datetime, project, contextCap } =
+    opts;
   if (!planStats && !execStats) return null;
 
   // Compute combined stats for frontmatter
@@ -736,7 +770,8 @@ export function formatToolsNoteContent(opts: {
       ? mergeTranscriptStats(planStats, execStats)
       : ((planStats ?? execStats) as TranscriptStats);
 
-  const statsYaml = formatStatsYaml(combined);
+  const cap = contextCap ?? resolveContextCap(combined.peakTurnContext);
+  const statsYaml = formatStatsYaml(combined, cap);
 
   // Build body sections
   const sections: string[] = [];
@@ -757,11 +792,15 @@ export function formatToolsNoteContent(opts: {
   if (execStats) addPhase("Execution Phase", execStats);
 
   // Combined summary
+  const pct = computeContextPct(combined.tokens, cap);
   sections.push("");
   sections.push("## Combined");
   sections.push("");
   sections.push(
     `**${formatNumber(combined.totalToolCalls)} tool calls** | **${formatNumber(combined.tokens.input)} in / ${formatNumber(combined.tokens.output)} out tokens** | **${combined.totalErrors} errors**`,
+  );
+  sections.push(
+    `**Context: ${formatNumber(combined.tokens.input + combined.tokens.output)} / ${formatNumber(cap)} (${pct}%)**`,
   );
 
   const body = sections.join("\n");

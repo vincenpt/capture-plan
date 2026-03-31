@@ -164,6 +164,7 @@ describe("parseStateFromFrontmatter", () => {
       model: "claude-opus-4-6",
       durationMs: 60_000,
       tokens: { input: 5000, output: 1000, cache_read: 3000, cache_create: 500 },
+      peakTurnContext: 8000,
       subagentCount: 1,
       tools: [{ name: "Read", calls: 5, errors: 0 }],
       mcpServers: [{ name: "context-mode", tools: ["ctx_search"], calls: 2 }],

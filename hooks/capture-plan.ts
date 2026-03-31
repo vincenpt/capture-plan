@@ -18,6 +18,7 @@ import {
   mergeTagsOnDailyNote,
   nextCounter,
   padCounter,
+  resolveContextCap,
   runObsidian,
   type SessionState,
   shortSessionId,
@@ -146,7 +147,8 @@ async function main(): Promise<void> {
     const project = getProjectName(payload.cwd);
     const tagsYaml = formatTagsYaml(newTags);
 
-    const modelYaml = formatModelYaml(stats);
+    const contextCap = resolveContextCap(stats?.peakTurnContext ?? 0, config.context_cap);
+    const modelYaml = formatModelYaml(stats, contextCap);
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
