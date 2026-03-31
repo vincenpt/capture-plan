@@ -12,7 +12,7 @@ A Claude Code plugin that captures plans and execution summaries to an Obsidian 
 ## Commands
 
 ```bash
-bun test                              # Run all tests (181 tests across 5 files)
+bun test                              # Run all tests (200 tests across 5 files)
 bun test capture-done.test.ts         # Run a single test file
 bun test --grep "pattern"             # Run tests matching a pattern
 bun test --watch                      # Watch mode
@@ -64,3 +64,9 @@ Tests in `hooks/__tests__/` are split by I/O boundary:
 ### Debug Logs
 
 Written to `/tmp/capture-plan-debug.log` and `/tmp/capture-done-debug.log`.
+
+### Plugin Directory Layout
+
+- `skills/` — Plugin-distributed skills (discovered globally when plugin is installed). Must be top-level, not inside `.claude/`.
+- `.claude/commands/` — Project-local dev commands (start-dev, end-dev, release). Only visible when working in this repo.
+- `.claude-plugin/` — Plugin metadata: `plugin.json`, `marketplace.json`, `hooks/hooks.json`.
