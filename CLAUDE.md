@@ -12,7 +12,7 @@ A Claude Code plugin that captures plans and execution summaries to an Obsidian 
 ## Commands
 
 ```bash
-bun test                              # Run all tests (200 tests across 5 files)
+bun test                              # Run all tests (385 tests across 7 files)
 bun test capture-done.test.ts         # Run a single test file
 bun test --grep "pattern"             # Run tests matching a pattern
 bun test --watch                      # Watch mode
@@ -27,6 +27,7 @@ No build step — Bun runs TypeScript natively. Biome handles linting and format
 
 - **No `any` types** — use proper interfaces, `unknown`, or type-safe helpers. `noExplicitAny` is an error.
 - **No non-null assertions (`!`)** — use optional chaining (`?.`), guards, or local const extraction instead.
+- **JSDoc on all exports** — every exported function, type, and interface must have a `/** ... */` doc comment. Do not use `// ---- Section ----` divider comments.
 - For Bun process mocks in tests, use the `spawnSyncResult()` helper in `shared.external.test.ts` instead of `as any` casts.
 - Run `bun run check` before committing to catch lint + format issues.
 
@@ -37,9 +38,9 @@ No build step — Bun runs TypeScript natively. Biome handles linting and format
 1. `capture-plan.ts` receives the ExitPlanMode payload via stdin JSON, extracts plan content, creates an Obsidian note at `<vault>/<plan_path>/<yyyy>/<mm-dd>/<counter>-<slug>/plan.md`, and saves session state to `hooks/state/{sessionId}.json`
 2. `capture-done.ts` receives the Stop payload via stdin JSON, reads saved session state, finds and parses the transcript, and writes `summary.md` in the same directory as the plan
 
-### Key Module: `hooks/shared.ts`
+### Key Modules: `hooks/lib/` and `hooks/shared.ts`
 
-Central utility module exporting: config loading (3-layer TOML merge), Obsidian CLI wrapper, Claude Haiku summarization, date/slug helpers, session state read/write, journal append with tag merging.
+`hooks/shared.ts` is a barrel re-export of focused modules under `hooks/lib/`: `config.ts`, `dates.ts`, `formatting.ts`, `obsidian.ts`, `session-state.ts`, `text.ts`, `types.ts`. Hook scripts import from `./shared.ts`; tests and internal modules import from `./lib/` directly.
 
 ### Config Cascade (highest priority wins)
 
