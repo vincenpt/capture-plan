@@ -724,6 +724,40 @@ describe("collectToolLog", () => {
     expect(log.turns[0].agentId).toBe("sub-1");
   });
 
+  it("propagates blockId from content block to ToolLogEntry", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        timestamp: "2026-03-30T14:00:00.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "tool_use", name: "Agent", id: "toolu_abc123", input: { prompt: "test" } },
+          ],
+          usage: { input_tokens: 100, output_tokens: 50 },
+        },
+      }),
+      humanEntry({ timestamp: "2026-03-30T14:00:01.000Z" }),
+    ];
+    const log = collectToolLog(entries);
+    expect(log.turns[0].tools[0].blockId).toBe("toolu_abc123");
+  });
+
+  it("blockId is undefined when content block has no id", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        timestamp: "2026-03-30T14:00:00.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", name: "Read", input: {} }],
+          usage: { input_tokens: 100, output_tokens: 50 },
+        },
+      }),
+      humanEntry({ timestamp: "2026-03-30T14:00:01.000Z" }),
+    ];
+    const log = collectToolLog(entries);
+    expect(log.turns[0].tools[0].blockId).toBeUndefined();
+  });
+
   it("respects range parameters", () => {
     const entries: TranscriptEntry[] = [
       assistantEntry({

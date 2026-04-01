@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  aggregateSidechainStats,
   computeContextPct,
   contextCapLabel,
   escapeTableCell,
@@ -29,7 +30,7 @@ import {
   stripTitleLine,
   toSlug,
 } from "../shared.ts";
-import type { ToolLog, TranscriptStats } from "../transcript.ts";
+import type { ToolLog, TranscriptStats, TurnLogEntry } from "../transcript.ts";
 
 // ---- extractTitle ----
 
@@ -1283,7 +1284,7 @@ describe("formatToolsLogContent", () => {
     expect(result?.markdown).toContain("[[Claude/Plans/2026/03-30/001-my-plan/plan|My Plan]]");
   });
 
-  it("renders planning phase with turn headers", () => {
+  it("renders planning phase with turn headers and block references", () => {
     const result = formatToolsLogContent({
       ...baseLogOpts,
       planLog: makeTurnLog(),
@@ -1295,6 +1296,7 @@ describe("formatToolsLogContent", () => {
     expect(md).toContain("3.0s");
     expect(md).toContain("1,200 in");
     expect(md).toContain("500 out");
+    expect(md).toContain("^turn-1");
   });
 
   it("renders justification as blockquote", () => {
@@ -1420,7 +1422,7 @@ describe("formatToolsLogContent", () => {
     expect(result?.agentFiles).toEqual([]);
   });
 
-  it("collects agent files and replaces prompt with wikilink", () => {
+  it("collects agent files with frontmatter and replaces prompt with wikilink", () => {
     const log: ToolLog = {
       turns: [
         {
@@ -1459,7 +1461,16 @@ describe("formatToolsLogContent", () => {
     expect(result?.agentFiles[0].path).toBe(
       "Claude/Plans/2026/03-30/001-my-plan/agents/7-plan-my-plan",
     );
-    expect(result?.agentFiles[0].content).toContain("# Full markdown");
+    // Content includes frontmatter followed by prompt
+    const content = result?.agentFiles[0].content ?? "";
+    expect(content).toMatch(/^---\n/);
+    expect(content).toContain("# Full markdown");
+    expect(content).toContain("subagent_type: plan");
+    expect(content).toContain('description: "Explore hooks and config"');
+    expect(content).toContain("dispatched_at:");
+    expect(content).toContain("tools-log#^turn-7|Turn 7");
+    expect(content).toContain("[[Daily/2026/03-30|2026-03-30 2:00 PM]]");
+    expect(content).toContain("[[Claude/Plans/2026/03-30/001-my-plan/plan|My Plan]]");
     // Wikilink in markdown
     expect(result?.markdown).toContain(
       "[[Claude/Plans/2026/03-30/001-my-plan/agents/7-plan-my-plan\\|Explore hooks and config]]",
@@ -1470,11 +1481,12 @@ describe("formatToolsLogContent", () => {
     expect(result?.markdown).not.toContain("| description |");
     // Agent table header is bolded
     expect(result?.markdown).toContain("| **Agent** | |");
-    // Tool name in heading
+    // Tool name in heading with block ref
     expect(result?.markdown).toContain("### Turn 7: Agent");
+    expect(result?.markdown).toContain("^turn-7");
   });
 
-  it("uses fallback slug when Agent has no description", () => {
+  it("uses fallback slug when Agent has no description and omits description from frontmatter", () => {
     const log: ToolLog = {
       turns: [
         {
@@ -1505,5 +1517,314 @@ describe("formatToolsLogContent", () => {
     });
     expect(result?.agentFiles[0].path).toContain("agents/3-agent-my-plan");
     expect(result?.markdown).toContain("\\|agent-prompt]]");
+    // Frontmatter should NOT include description when using default fallback
+    const content = result?.agentFiles[0].content ?? "";
+    expect(content).toContain("subagent_type: agent");
+    expect(content).not.toContain("description:");
+  });
+
+  it("agent frontmatter includes sidechain stats when blockId matches", () => {
+    const log: ToolLog = {
+      turns: [
+        {
+          turnNumber: 5,
+          timestamp: "2026-03-30T14:00:00.000Z",
+          durationMs: 2000,
+          tokensIn: 5000,
+          tokensOut: 1000,
+          justification: "",
+          tools: [
+            {
+              seq: 1,
+              name: "Agent",
+              input: {
+                subagent_type: "Explore",
+                description: "Search codebase",
+                prompt: "Find all tests",
+              },
+              isError: false,
+              blockId: "toolu_abc123",
+            },
+          ],
+          isSidechain: false,
+        },
+        {
+          turnNumber: 6,
+          timestamp: "2026-03-30T14:00:02.000Z",
+          durationMs: 3000,
+          tokensIn: 8000,
+          tokensOut: 2000,
+          justification: "",
+          tools: [
+            { seq: 2, name: "Glob", input: { pattern: "**/*.ts" }, isError: false },
+            { seq: 3, name: "Read", input: { file_path: "a.ts" }, isError: false },
+          ],
+          isSidechain: true,
+          agentId: "toolu_abc123",
+        },
+        {
+          turnNumber: 7,
+          timestamp: "2026-03-30T14:00:05.000Z",
+          durationMs: 1500,
+          tokensIn: 4000,
+          tokensOut: 800,
+          justification: "",
+          tools: [{ seq: 4, name: "Grep", input: { pattern: "test" }, isError: false }],
+          isSidechain: true,
+          agentId: "toolu_abc123",
+        },
+      ],
+      totalToolCalls: 4,
+      totalErrors: 0,
+    };
+    const result = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: null,
+      execLog: log,
+      model: "claude-opus-4-6",
+    });
+    const content = result?.agentFiles[0].content ?? "";
+    expect(content).toContain("tokens_in: 12000");
+    expect(content).toContain("tokens_out: 2800");
+    expect(content).toContain("tool_calls: 3");
+    expect(content).toContain("sidechain_turns: 2");
+    expect(content).toContain('duration: "4.5s"');
+    expect(content).toContain("model: claude-opus-4-6");
+  });
+
+  it("agent frontmatter omits sidechain stats when no matching turns", () => {
+    const log: ToolLog = {
+      turns: [
+        {
+          turnNumber: 2,
+          timestamp: "2026-03-30T14:00:00.000Z",
+          durationMs: 1000,
+          tokensIn: 500,
+          tokensOut: 200,
+          justification: "",
+          tools: [
+            {
+              seq: 1,
+              name: "Agent",
+              input: { subagent_type: "Plan", description: "Design", prompt: "Plan it" },
+              isError: false,
+              blockId: "toolu_no_match",
+            },
+          ],
+          isSidechain: false,
+        },
+      ],
+      totalToolCalls: 1,
+      totalErrors: 0,
+    };
+    const result = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: null,
+      execLog: log,
+    });
+    const content = result?.agentFiles[0].content ?? "";
+    expect(content).toContain("subagent_type: plan");
+    expect(content).not.toContain("tokens_in:");
+    expect(content).not.toContain("sidechain_turns:");
+  });
+
+  it("agent frontmatter uses tool.input.model when specified", () => {
+    const log: ToolLog = {
+      turns: [
+        {
+          turnNumber: 1,
+          timestamp: "2026-03-30T14:00:00.000Z",
+          durationMs: 1000,
+          tokensIn: 100,
+          tokensOut: 50,
+          justification: "",
+          tools: [
+            {
+              seq: 1,
+              name: "Agent",
+              input: { subagent_type: "Explore", prompt: "Search", model: "haiku" },
+              isError: false,
+            },
+          ],
+          isSidechain: false,
+        },
+      ],
+      totalToolCalls: 1,
+      totalErrors: 0,
+    };
+    const result = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: null,
+      execLog: log,
+      model: "claude-opus-4-6",
+    });
+    const content = result?.agentFiles[0].content ?? "";
+    // tool.input.model takes priority over session model
+    expect(content).toContain("model: haiku");
+    expect(content).not.toContain("model: claude-opus-4-6");
+  });
+
+  it("agent frontmatter falls back to session model", () => {
+    const log: ToolLog = {
+      turns: [
+        {
+          turnNumber: 1,
+          timestamp: "2026-03-30T14:00:00.000Z",
+          durationMs: 1000,
+          tokensIn: 100,
+          tokensOut: 50,
+          justification: "",
+          tools: [
+            {
+              seq: 1,
+              name: "Agent",
+              input: { subagent_type: "Explore", prompt: "Search" },
+              isError: false,
+            },
+          ],
+          isSidechain: false,
+        },
+      ],
+      totalToolCalls: 1,
+      totalErrors: 0,
+    };
+    const result = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: null,
+      execLog: log,
+      model: "claude-sonnet-4-6",
+    });
+    const content = result?.agentFiles[0].content ?? "";
+    expect(content).toContain("model: claude-sonnet-4-6");
+  });
+
+  it("multiple agents in same turn get distinct frontmatter", () => {
+    const log: ToolLog = {
+      turns: [
+        {
+          turnNumber: 4,
+          timestamp: "2026-03-30T14:00:00.000Z",
+          durationMs: 2000,
+          tokensIn: 1000,
+          tokensOut: 500,
+          justification: "",
+          tools: [
+            {
+              seq: 1,
+              name: "Agent",
+              input: {
+                subagent_type: "Explore",
+                description: "First agent",
+                prompt: "Prompt A",
+              },
+              isError: false,
+              blockId: "toolu_a",
+            },
+            {
+              seq: 2,
+              name: "Agent",
+              input: {
+                subagent_type: "Plan",
+                description: "Second agent",
+                prompt: "Prompt B",
+              },
+              isError: false,
+              blockId: "toolu_b",
+            },
+          ],
+          isSidechain: false,
+        },
+        {
+          turnNumber: 5,
+          timestamp: "2026-03-30T14:00:02.000Z",
+          durationMs: 1000,
+          tokensIn: 300,
+          tokensOut: 100,
+          justification: "",
+          tools: [{ seq: 3, name: "Read", input: { file_path: "x.ts" }, isError: false }],
+          isSidechain: true,
+          agentId: "toolu_b",
+        },
+      ],
+      totalToolCalls: 3,
+      totalErrors: 0,
+    };
+    const result = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: null,
+      execLog: log,
+    });
+    expect(result?.agentFiles).toHaveLength(2);
+    const [first, second] = result?.agentFiles ?? [];
+    expect(first.content).toContain("subagent_type: explore");
+    expect(first.content).not.toContain("sidechain_turns:");
+    expect(second.content).toContain("subagent_type: plan");
+    expect(second.content).toContain("sidechain_turns: 1");
+    expect(second.content).toContain("tokens_in: 300");
+  });
+});
+
+// ---- aggregateSidechainStats ----
+
+describe("aggregateSidechainStats", () => {
+  const makeTurn = (overrides: Partial<TurnLogEntry>): TurnLogEntry => ({
+    turnNumber: 1,
+    timestamp: "2026-03-30T14:00:00.000Z",
+    durationMs: 1000,
+    tokensIn: 500,
+    tokensOut: 200,
+    justification: "",
+    tools: [{ seq: 1, name: "Read", input: {}, isError: false }],
+    isSidechain: false,
+    ...overrides,
+  });
+
+  it("sums stats across matching sidechain turns", () => {
+    const turns = [
+      makeTurn({ isSidechain: true, agentId: "a1", tokensIn: 100, tokensOut: 50, durationMs: 500 }),
+      makeTurn({
+        turnNumber: 2,
+        isSidechain: true,
+        agentId: "a1",
+        tokensIn: 200,
+        tokensOut: 80,
+        durationMs: 700,
+        tools: [
+          { seq: 2, name: "Grep", input: {}, isError: false },
+          { seq: 3, name: "Read", input: {}, isError: false },
+        ],
+      }),
+    ];
+    const stats = aggregateSidechainStats(turns, "a1");
+    expect(stats.tokensIn).toBe(300);
+    expect(stats.tokensOut).toBe(130);
+    expect(stats.durationMs).toBe(1200);
+    expect(stats.toolCalls).toBe(3);
+    expect(stats.turnCount).toBe(2);
+  });
+
+  it("returns zeros when no turns match", () => {
+    const turns = [makeTurn({ isSidechain: true, agentId: "other" })];
+    const stats = aggregateSidechainStats(turns, "no-match");
+    expect(stats.tokensIn).toBe(0);
+    expect(stats.tokensOut).toBe(0);
+    expect(stats.turnCount).toBe(0);
+  });
+
+  it("ignores non-sidechain turns even with matching agentId", () => {
+    const turns = [makeTurn({ isSidechain: false, agentId: "a1", tokensIn: 999 })];
+    const stats = aggregateSidechainStats(turns, "a1");
+    expect(stats.turnCount).toBe(0);
+    expect(stats.tokensIn).toBe(0);
+  });
+
+  it("ignores sidechain turns with different agentId", () => {
+    const turns = [
+      makeTurn({ isSidechain: true, agentId: "a1", tokensIn: 100 }),
+      makeTurn({ isSidechain: true, agentId: "a2", tokensIn: 200 }),
+    ];
+    const stats = aggregateSidechainStats(turns, "a1");
+    expect(stats.tokensIn).toBe(100);
+    expect(stats.turnCount).toBe(1);
   });
 });

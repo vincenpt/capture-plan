@@ -1,6 +1,12 @@
 // formatting.ts — Stats & tool-log formatting
 
-import type { McpServerInfo, ToolLog, ToolUseRecord, TranscriptStats } from "../transcript.ts";
+import type {
+  McpServerInfo,
+  ToolLog,
+  ToolUseRecord,
+  TranscriptStats,
+  TurnLogEntry,
+} from "../transcript.ts";
 import { resolveContextCap } from "./config.ts";
 import { formatDuration } from "./dates.ts";
 import {
@@ -309,6 +315,36 @@ function formatTurnDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/** Aggregated sidechain turn statistics for a single subagent. */
+export interface SidechainStats {
+  tokensIn: number;
+  tokensOut: number;
+  durationMs: number;
+  toolCalls: number;
+  turnCount: number;
+}
+
+/** Aggregate sidechain turn stats for a specific agent identified by its tool_use blockId. */
+export function aggregateSidechainStats(allTurns: TurnLogEntry[], blockId: string): SidechainStats {
+  const result: SidechainStats = {
+    tokensIn: 0,
+    tokensOut: 0,
+    durationMs: 0,
+    toolCalls: 0,
+    turnCount: 0,
+  };
+  for (const turn of allTurns) {
+    if (turn.isSidechain && turn.agentId === blockId) {
+      result.tokensIn += turn.tokensIn;
+      result.tokensOut += turn.tokensOut;
+      result.durationMs += turn.durationMs;
+      result.toolCalls += turn.tools.length;
+      result.turnCount++;
+    }
+  }
+  return result;
+}
+
 /** Build the full tools-log note with per-turn tool call details, extracting agent prompts into separate files. */
 export function formatToolsLogContent(opts: {
   planLog: ToolLog | null;
@@ -354,6 +390,7 @@ export function formatToolsLogContent(opts: {
   // Body
   const sections: string[] = [];
   const agentFiles: AgentFileEntry[] = [];
+  const allLogTurns = [...(planLog?.turns ?? []), ...(execLog?.turns ?? [])];
 
   const renderPhase = (heading: string, log: ToolLog): void => {
     if (sections.length > 0) sections.push("\n---\n");
@@ -367,7 +404,7 @@ export function formatToolsLogContent(opts: {
       const toolNames = [...new Set(turn.tools.map((t) => t.name))].join(", ");
       const toolLabel = toolNames ? `: ${toolNames}` : "";
       sections.push(
-        `### Turn ${turn.turnNumber}${toolLabel} — ${tsLabel} (${durLabel} | ${tokLabel})${sidechain}\n`,
+        `### Turn ${turn.turnNumber}${toolLabel} — ${tsLabel} (${durLabel} | ${tokLabel})${sidechain} ^turn-${turn.turnNumber}\n`,
       );
 
       if (turn.isSidechain && turn.agentId) {
@@ -394,7 +431,36 @@ export function formatToolsLogContent(opts: {
               : "agent";
           const titleSlug = toSlug(planTitle);
           const filePath = `${planDir}/agents/${turn.turnNumber}-${agentType}-${titleSlug}`;
-          agentFiles.push({ path: filePath, content: tool.input.prompt });
+
+          // Build agent file frontmatter
+          const afm: string[] = [];
+          afm.push(`created: "[[${journalPath}|${datetime}]]"`);
+          afm.push(`plan: "[[${planDir}/plan|${planTitle.replace(/"/g, '\\"')}]]"`);
+          afm.push(
+            `dispatched_at: "[[${planDir}/tools-log#^turn-${turn.turnNumber}|Turn ${turn.turnNumber}]]"`,
+          );
+          afm.push(`subagent_type: ${agentType}`);
+          if (desc !== "agent-prompt") {
+            afm.push(`description: "${desc.replace(/"/g, '\\"')}"`);
+          }
+          const agentModel =
+            typeof tool.input.model === "string" && tool.input.model
+              ? tool.input.model
+              : (opts.model ?? "");
+          if (agentModel) afm.push(`model: ${agentModel}`);
+          if (tool.blockId) {
+            const sc = aggregateSidechainStats(allLogTurns, tool.blockId);
+            if (sc.turnCount > 0) {
+              afm.push(`tokens_in: ${sc.tokensIn}`);
+              afm.push(`tokens_out: ${sc.tokensOut}`);
+              afm.push(`duration: "${formatTurnDuration(sc.durationMs)}"`);
+              afm.push(`tool_calls: ${sc.toolCalls}`);
+              afm.push(`sidechain_turns: ${sc.turnCount}`);
+            }
+          }
+          const frontmatter = `---\n${afm.join("\n")}\n---\n`;
+
+          agentFiles.push({ path: filePath, content: frontmatter + tool.input.prompt });
           const safeDesc = desc.replace(/[|[\]]/g, "");
           agentPromptLink = `[[${filePath}\\|${safeDesc}]]`;
           skipDescription = true;

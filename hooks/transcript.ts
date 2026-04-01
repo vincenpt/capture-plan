@@ -63,6 +63,7 @@ export interface ToolLogEntry {
   name: string;
   input: Record<string, unknown>;
   isError: boolean;
+  blockId?: string;
 }
 
 /** A full assistant turn in the tool log: timestamp, tokens, justification text, and tool calls. */
@@ -530,6 +531,7 @@ export function collectToolLog(
         name: block.name as string,
         input: block.input ?? {},
         isError,
+        blockId: block.id,
       });
     }
 
