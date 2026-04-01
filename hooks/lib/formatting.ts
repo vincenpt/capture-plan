@@ -16,8 +16,7 @@ import {
 } from "./text.ts";
 import type { AgentFileEntry, ToolsLogResult } from "./types.ts";
 
-// ---- Stats Formatting ----
-
+/** Render transcript stats as YAML frontmatter lines (model, duration, tokens, etc.). */
 export function formatStatsYaml(stats: TranscriptStats, contextCap?: number): string {
   const lines: string[] = [];
   const cap = contextCap ?? resolveContextCap(stats.peakTurnContext);
@@ -39,6 +38,7 @@ export function formatStatsYaml(stats: TranscriptStats, contextCap?: number): st
   return lines.join("\n");
 }
 
+/** Render model name and context percentage as YAML frontmatter lines, or empty string if no stats. */
 export function formatModelYaml(stats: TranscriptStats | null, contextCap?: number): string {
   if (!stats?.model) return "";
   const cap = contextCap ?? resolveContextCap(stats.peakTurnContext);
@@ -47,6 +47,7 @@ export function formatModelYaml(stats: TranscriptStats | null, contextCap?: numb
   return `\nmodel: ${stats.model}${capSuffix}\ncontext_pct: ${pct}`;
 }
 
+/** Render tool usage records as a markdown table with name, call count, and error count columns. */
 export function formatToolTable(tools: ToolUseRecord[]): string {
   if (tools.length === 0) return "";
   const lines: string[] = [];
@@ -58,6 +59,7 @@ export function formatToolTable(tools: ToolUseRecord[]): string {
   return lines.join("\n");
 }
 
+/** Combine two TranscriptStats (e.g. planning + execution phases) by summing tokens, tools, and MCP servers. */
 export function mergeTranscriptStats(a: TranscriptStats, b: TranscriptStats): TranscriptStats {
   // Merge tokens
   const tokens = {
@@ -115,8 +117,7 @@ export function mergeTranscriptStats(a: TranscriptStats, b: TranscriptStats): Tr
   };
 }
 
-// ---- Tools Note ----
-
+/** Build the full tools-stats note (frontmatter + body) combining planning and execution phase stats. */
 export function formatToolsNoteContent(opts: {
   planStats: TranscriptStats | null;
   execStats: TranscriptStats | null;
@@ -186,12 +187,11 @@ ${body}
 `;
 }
 
-// ---- Tool Log ----
-
 const LARGE_CONTENT_KEYS = new Set(["old_string", "new_string"]);
 const ARG_MAX_LEN = 100;
 const ARG_PREVIEW_LEN = 60;
 
+/** Format a tool invocation's arguments as a markdown table and optional code fence for the tool log. */
 export function formatToolArgs(
   toolName: string,
   input: Record<string, unknown>,
@@ -309,6 +309,7 @@ function formatTurnDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/** Build the full tools-log note with per-turn tool call details, extracting agent prompts into separate files. */
 export function formatToolsLogContent(opts: {
   planLog: ToolLog | null;
   execLog: ToolLog | null;

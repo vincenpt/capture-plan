@@ -18,6 +18,7 @@ interface SessionStartPayload {
   [key: string]: unknown;
 }
 
+/** Data written to a temp file at session start for downstream hooks to discover context cap and version. */
 export interface ContextHint {
   session_id: string;
   context_cap?: number;
@@ -37,6 +38,7 @@ export function parseModelContextCap(model: string): number | undefined {
   return undefined;
 }
 
+/** Build the temp file path where the context hint is stored for a given session. */
 export function contextHintPath(sessionId: string): string {
   return join(tmpdir(), `capture-plan-context-${sessionId}.json`);
 }

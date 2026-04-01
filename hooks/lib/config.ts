@@ -5,8 +5,6 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Config, type ContextHintResult, PLUGIN_ROOT } from "./types.ts";
 
-// ---- Config Paths ----
-
 const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.toml");
 const USER_GLOBAL_CONFIG = join(homedir(), ".config", "capture-plan", "config.toml");
 
@@ -14,8 +12,6 @@ const DEFAULT_CONFIG: Config = {
   plan_path: "Claude/Plans",
   journal_path: "Journal",
 };
-
-// ---- Config Loading ----
 
 async function loadToml(path: string): Promise<Record<string, unknown> | null> {
   try {
@@ -26,6 +22,7 @@ async function loadToml(path: string): Promise<Record<string, unknown> | null> {
   }
 }
 
+/** Load plugin configuration by merging the 3-layer TOML cascade (plugin default, user global, project local). */
 export async function loadConfig(cwd?: string): Promise<Config> {
   const pluginDefault = await loadToml(PLUGIN_DEFAULT_CONFIG);
   const userGlobal = await loadToml(USER_GLOBAL_CONFIG);
@@ -42,8 +39,7 @@ export async function loadConfig(cwd?: string): Promise<Config> {
   };
 }
 
-// ---- Claude Summarization ----
-
+/** Summarize content using Claude Haiku, returning a short summary and comma-separated tags. Falls back to text extraction on failure. */
 export async function summarizeWithClaude(
   content: string,
   systemPrompt: string,
@@ -94,10 +90,9 @@ export async function summarizeWithClaude(
   return { summary, tags };
 }
 
-// ---- Context Window ----
-
 const DEFAULT_CONTEXT_CAP = 200_000;
 
+/** Read the context hint file written by SessionStart, returning context cap and CC version. */
 export function readContextHint(sessionId: string): ContextHintResult {
   try {
     const hintFile = join(tmpdir(), `capture-plan-context-${sessionId}.json`);
@@ -113,6 +108,7 @@ export function readContextHint(sessionId: string): ContextHintResult {
   }
 }
 
+/** Read the Claude Code version string from the session's context hint file. */
 export function readCcVersion(sessionId: string): string | undefined {
   return readContextHint(sessionId).cc_version;
 }
@@ -123,6 +119,7 @@ export function parseCcVersion(raw: string): string | undefined {
   return match ? `v${match[1]}` : undefined;
 }
 
+/** Detect the installed Claude Code version by running `claude --version`. */
 export function detectCcVersion(): string | undefined {
   try {
     const result = Bun.spawnSync(["claude", "--version"], {
@@ -136,6 +133,7 @@ export function detectCcVersion(): string | undefined {
   }
 }
 
+/** Resolve the context window cap from config, session hint, or peak usage heuristic. */
 export function resolveContextCap(
   peakContext: number,
   configCap?: number,
@@ -150,8 +148,7 @@ export function resolveContextCap(
   return DEFAULT_CONTEXT_CAP;
 }
 
-// ---- Counter (per-day, mkdir-locked) ----
-
+/** Return the next plan counter for a date directory by scanning existing `NNN-slug` entries. */
 export function nextCounter(dateDirPath: string): number {
   try {
     const entries = readdirSync(dateDirPath);
@@ -171,8 +168,7 @@ export function nextCounter(dateDirPath: string): number {
   }
 }
 
-// ---- Transcript ----
-
+/** Locate the JSONL transcript file for a session, trying the cwd-derived project slug first then scanning all projects. */
 export function findTranscriptPath(sessionId: string, cwd?: string): string | null {
   const projectsDir = join(homedir(), ".claude", "projects");
 

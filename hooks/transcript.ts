@@ -2,8 +2,7 @@
 
 import { readFileSync } from "node:fs";
 
-// ---- Types ----
-
+/** A single content block within a transcript message (text, tool_use, or tool_result). */
 export interface ContentBlock {
   type: string;
   text?: string;
@@ -15,6 +14,7 @@ export interface ContentBlock {
   content?: string | ContentBlock[];
 }
 
+/** A single line from the JSONL transcript, representing one assistant or human turn. */
 export interface TranscriptEntry {
   type: string;
   timestamp?: string;
@@ -35,6 +35,7 @@ export interface TranscriptEntry {
   [key: string]: unknown;
 }
 
+/** Aggregated token counts across input, output, and cache dimensions. */
 export interface TokenUsage {
   input: number;
   output: number;
@@ -42,18 +43,21 @@ export interface TokenUsage {
   cache_create: number;
 }
 
+/** Summary of a single tool's usage: total calls and error count. */
 export interface ToolUseRecord {
   name: string;
   calls: number;
   errors: number;
 }
 
+/** Summary of an MCP server's participation: tools used and total call count. */
 export interface McpServerInfo {
   name: string;
   tools: string[];
   calls: number;
 }
 
+/** A single tool invocation within a turn, with its sequence number and input arguments. */
 export interface ToolLogEntry {
   seq: number;
   name: string;
@@ -61,6 +65,7 @@ export interface ToolLogEntry {
   isError: boolean;
 }
 
+/** A full assistant turn in the tool log: timestamp, tokens, justification text, and tool calls. */
 export interface TurnLogEntry {
   turnNumber: number;
   timestamp: string;
@@ -73,12 +78,14 @@ export interface TurnLogEntry {
   agentId?: string;
 }
 
+/** Chronological log of all tool-using turns with aggregate call and error counts. */
 export interface ToolLog {
   turns: TurnLogEntry[];
   totalToolCalls: number;
   totalErrors: number;
 }
 
+/** Aggregate statistics for a transcript range: model, duration, tokens, tools, and MCP servers. */
 export interface TranscriptStats {
   model: string;
   durationMs: number;
@@ -91,12 +98,10 @@ export interface TranscriptStats {
   totalErrors: number;
 }
 
-// ---- Constants ----
-
+/** Tool names that indicate real execution activity (not just read-only exploration). */
 export const EXECUTION_TOOLS = new Set(["Edit", "Write", "Bash", "NotebookEdit", "MultiEdit"]);
 
-// ---- Functions ----
-
+/** Extract the content blocks array from an assistant transcript entry. */
 export function getContentBlocks(entry: TranscriptEntry): ContentBlock[] {
   if (entry.type !== "assistant") return [];
   const content = entry.message?.content;
@@ -104,6 +109,7 @@ export function getContentBlocks(entry: TranscriptEntry): ContentBlock[] {
   return content;
 }
 
+/** Parse a JSONL transcript file into an array of entries, skipping malformed lines. */
 export function parseTranscript(transcriptPath: string): TranscriptEntry[] {
   const raw = readFileSync(transcriptPath, "utf8");
   const entries: TranscriptEntry[] = [];
@@ -118,6 +124,7 @@ export function parseTranscript(transcriptPath: string): TranscriptEntry[] {
   return entries;
 }
 
+/** Find the index of the last ExitPlanMode tool_use in the transcript (handles multiple plans). */
 export function findExitPlanIndex(entries: TranscriptEntry[]): number {
   // Find the LAST ExitPlanMode tool_use (in case of multiple plans)
   let lastIdx = -1;
@@ -131,6 +138,7 @@ export function findExitPlanIndex(entries: TranscriptEntry[]): number {
   return lastIdx;
 }
 
+/** Check whether any execution tools (Edit, Write, Bash, etc.) were used after a given entry index. */
 export function hasExecutionAfter(entries: TranscriptEntry[], afterIdx: number): boolean {
   for (let i = afterIdx + 1; i < entries.length; i++) {
     for (const block of getContentBlocks(entries[i])) {
@@ -142,6 +150,7 @@ export function hasExecutionAfter(entries: TranscriptEntry[], afterIdx: number):
   return false;
 }
 
+/** Walk backwards from the end to find the last assistant text block after a given index. */
 export function extractLastAssistantText(entries: TranscriptEntry[], afterIdx: number): string {
   // Walk backwards from end, find last assistant text block
   for (let i = entries.length - 1; i > afterIdx; i--) {
@@ -158,6 +167,7 @@ export function extractLastAssistantText(entries: TranscriptEntry[], afterIdx: n
   return "";
 }
 
+/** Collect text from the last N assistant entries after a given index, in chronological order. */
 export function extractConclusionText(
   entries: TranscriptEntry[],
   afterIdx: number,
@@ -182,6 +192,7 @@ export function extractConclusionText(
 
 const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
+/** Collect unique file paths modified by file-writing tools (Edit, Write, etc.) after a given index. */
 export function collectChangedFiles(entries: TranscriptEntry[], afterIdx: number): string[] {
   const files = new Set<string>();
   for (let i = afterIdx + 1; i < entries.length; i++) {
@@ -197,6 +208,7 @@ export function collectChangedFiles(entries: TranscriptEntry[], afterIdx: number
   return [...files];
 }
 
+/** Concatenate all assistant text blocks after a given index into a single narrative string. */
 export function collectAllAssistantText(entries: TranscriptEntry[], afterIdx: number): string {
   const texts: string[] = [];
   for (let i = afterIdx + 1; i < entries.length; i++) {
@@ -209,6 +221,7 @@ export function collectAllAssistantText(entries: TranscriptEntry[], afterIdx: nu
   return texts.join("\n\n");
 }
 
+/** Collected text and file data from the execution phase of a session. */
 export interface ExecutionStats {
   filesChanged: string[];
   allAssistantText: string;
@@ -232,6 +245,7 @@ export function selectDoneText(
   return summary;
 }
 
+/** Gather all execution phase data (changed files, assistant text, conclusion) after the ExitPlanMode index. */
 export function collectExecutionStats(
   entries: TranscriptEntry[],
   afterIdx: number,
@@ -244,8 +258,6 @@ export function collectExecutionStats(
   };
 }
 
-// ---- Transcript Stats Extraction ----
-
 function resolveRange(
   entries: TranscriptEntry[],
   startIdx?: number,
@@ -256,6 +268,7 @@ function resolveRange(
   return [Math.max(0, start), Math.min(entries.length - 1, end)];
 }
 
+/** Extract the content blocks array from a human transcript entry. */
 export function getUserContentBlocks(entry: TranscriptEntry): ContentBlock[] {
   if (entry.type !== "human") return [];
   const content = entry.message?.content;
@@ -263,6 +276,7 @@ export function getUserContentBlocks(entry: TranscriptEntry): ContentBlock[] {
   return content;
 }
 
+/** Find the model identifier from the first assistant entry with a model field, stripping the date suffix. */
 export function extractModel(
   entries: TranscriptEntry[],
   startIdx?: number,
@@ -280,6 +294,7 @@ export function extractModel(
   return "unknown";
 }
 
+/** Compute the wall-clock duration in milliseconds between the first and last entries in a range. */
 export function computeDurationMs(
   entries: TranscriptEntry[],
   startIdx?: number,
@@ -293,6 +308,7 @@ export function computeDurationMs(
   return Math.max(0, diff);
 }
 
+/** Sum all token usage (input, output, cache) across assistant entries in a range. */
 export function aggregateTokens(
   entries: TranscriptEntry[],
   startIdx?: number,
@@ -312,6 +328,7 @@ export function aggregateTokens(
   return totals;
 }
 
+/** Find the highest single-turn context usage (input + cache_read tokens) in a range. */
 export function peakTurnContext(
   entries: TranscriptEntry[],
   startIdx?: number,
@@ -329,6 +346,7 @@ export function peakTurnContext(
   return peak;
 }
 
+/** Count distinct subagent IDs (sidechain entries) in a transcript range. */
 export function countSubagents(
   entries: TranscriptEntry[],
   startIdx?: number,
@@ -355,6 +373,7 @@ function parseMcpToolName(toolName: string): { server: string; tool: string } | 
   return { server: rest.slice(0, sepIdx), tool: rest };
 }
 
+/** Aggregate tool call counts, errors, and MCP server participation across a transcript range. */
 export function collectToolUsage(
   entries: TranscriptEntry[],
   startIdx?: number,
@@ -430,6 +449,7 @@ export function collectToolUsage(
   return { tools, mcpServers, totalCalls, totalErrors };
 }
 
+/** Collect all transcript statistics (model, duration, tokens, tools, MCP) for a range of entries. */
 export function collectTranscriptStats(
   entries: TranscriptEntry[],
   startIdx?: number,
@@ -459,6 +479,7 @@ export function collectTranscriptStats(
   };
 }
 
+/** Build a chronological tool log with per-turn detail (timestamps, tokens, justification, tool args). */
 export function collectToolLog(
   entries: TranscriptEntry[],
   startIdx?: number,

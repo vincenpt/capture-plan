@@ -4,8 +4,7 @@ import { getDatePartsFor } from "./dates.ts";
 import { mergeTags } from "./text.ts";
 import type { Config } from "./types.ts";
 
-// ---- Obsidian CLI ----
-
+/** Execute the Obsidian CLI with the given arguments, optionally scoped to a vault. */
 export function runObsidian(args: string[], vault?: string): { stdout: string; exitCode: number } {
   try {
     const cmd = vault ? ["obsidian", `vault=${vault}`, ...args] : ["obsidian", ...args];
@@ -19,6 +18,7 @@ export function runObsidian(args: string[], vault?: string): { stdout: string; e
   }
 }
 
+/** Create a note in the vault at the given path, escaping newlines for the CLI. */
 export function createVaultNote(
   path: string,
   content: string,
@@ -29,8 +29,7 @@ export function createVaultNote(
   return { success: result.exitCode === 0, exitCode: result.exitCode };
 }
 
-// ---- Vault Path ----
-
+/** Resolve the absolute filesystem path of an Obsidian vault via the CLI. */
 export function getVaultPath(vault?: string): string | null {
   try {
     const args = vault
@@ -44,8 +43,7 @@ export function getVaultPath(vault?: string): string | null {
   }
 }
 
-// ---- Tags on Daily Note ----
-
+/** Read existing tags from a daily note and merge in new ones, deduplicating. */
 export function mergeTagsOnDailyNote(newTags: string, journalPath: string, vault?: string): void {
   if (!journalPath) return;
   const pathWithExt = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
@@ -61,17 +59,18 @@ export function mergeTagsOnDailyNote(newTags: string, journalPath: string, vault
   );
 }
 
-// ---- Daily Journal ----
-
+/** Build the Obsidian vault path for the daily journal note on a given date. */
 export function getJournalPathForDate(config: Config, date: Date): string {
   const { dd, mm, yyyy, monthName, dayName } = getDatePartsFor(date);
   return `${config.journal_path}/${yyyy}/${mm}-${monthName}/${dd}-${dayName}`;
 }
 
+/** Build the Obsidian vault path for today's daily journal note. */
 export function getJournalPath(config: Config): string {
   return getJournalPathForDate(config, new Date());
 }
 
+/** Append content to a journal note, creating the note first if it doesn't exist. */
 export function appendToJournal(content: string, journalPath: string, vault?: string): void {
   const pathWithExt = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
   const result = runObsidian(["append", `path=${pathWithExt}`, `content=${content}`], vault);

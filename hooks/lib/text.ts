@@ -4,8 +4,7 @@ import { appendFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { TokenUsage } from "../transcript.ts";
 
-// ---- Debug Logging ----
-
+/** Append a debug message to the given log file, silently ignoring write errors. */
 export function debugLog(msg: string, logFile: string): void {
   try {
     appendFileSync(logFile, msg);
@@ -14,8 +13,7 @@ export function debugLog(msg: string, logFile: string): void {
   }
 }
 
-// ---- Slug & Title ----
-
+/** Extract the first non-empty line of plan content as a clean title, stripping markdown heading markers. */
 export function extractTitle(content: string): string {
   for (const rawLine of content.split("\n")) {
     const line = rawLine
@@ -30,6 +28,7 @@ export function extractTitle(content: string): string {
   return "Unnamed Plan";
 }
 
+/** Convert a title to a lowercase kebab-case slug, truncated to 80 characters at word boundaries. */
 export function toSlug(title: string): string {
   let slug = title
     .toLowerCase()
@@ -54,6 +53,7 @@ export function toSlug(title: string): string {
   return slug || "unnamed-plan";
 }
 
+/** Remove the first non-empty line (the title) from plan content, trimming leading blank lines. */
 export function stripTitleLine(content: string): string {
   const lines = content.split("\n");
   for (let i = 0; i < lines.length; i++) {
@@ -73,8 +73,7 @@ export function stripTitleLine(content: string): string {
   return content;
 }
 
-// ---- Tags ----
-
+/** Format a comma-separated tag string as YAML list items (e.g. "  - tag1\n  - tag2"). */
 export function formatTagsYaml(tagsCsv: string): string {
   const tags = tagsCsv
     .split(",")
@@ -84,6 +83,7 @@ export function formatTagsYaml(tagsCsv: string): string {
   return tags.map((t) => `  - ${t}`).join("\n");
 }
 
+/** Merge existing tags with new comma-separated tags, deduplicating while preserving order. */
 export function mergeTags(existing: string[], newTagsCsv: string): string {
   const newTags = newTagsCsv
     .split(",")
@@ -101,13 +101,13 @@ export function mergeTags(existing: string[], newTagsCsv: string): string {
   return merged.join(",");
 }
 
-// ---- Project & Session Helpers ----
-
+/** Extract the project directory name from a cwd path (e.g. "/foo/bar" -> "bar"). */
 export function getProjectName(cwd?: string): string {
   if (!cwd) return "";
   return basename(cwd);
 }
 
+/** Build a "parent/name" label from a cwd path for display in frontmatter. */
 export function getProjectLabel(cwd?: string): string {
   if (!cwd) return "unknown";
   const base = basename(cwd);
@@ -115,22 +115,22 @@ export function getProjectLabel(cwd?: string): string {
   return parent && parent !== "." ? `${parent}/${base}` : base;
 }
 
+/** Truncate a session ID to its first 8 characters for use in wikilinks. */
 export function shortSessionId(id: string): string {
   return id.slice(0, 8);
 }
 
-// ---- Number Formatting ----
-
+/** Format a number with locale-aware thousands separators (e.g. 1,234). */
 export function formatNumber(n: number): string {
   return n.toLocaleString("en-US");
 }
 
+/** Zero-pad a counter to 3 digits for use in vault directory names. */
 export function padCounter(n: number): string {
   return String(n).padStart(3, "0");
 }
 
-// ---- Tool Log Helpers ----
-
+/** Escape pipe characters and newlines for safe use inside markdown table cells. */
 export function escapeTableCell(val: string): string {
   return val.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
 }
@@ -144,6 +144,7 @@ const CODE_LIKE_KEYS = new Set([
   "model",
 ]);
 
+/** Determine whether a tool argument value should be rendered as inline code in the tool log. */
 export function isCodeLike(key: string, val: string): boolean {
   if (CODE_LIKE_KEYS.has(key)) return true;
   if (/^[~/.]/.test(val) || val.startsWith("..")) return true;
@@ -177,24 +178,26 @@ const EXT_TO_LANG: Record<string, string> = {
   ".swift": "swift",
 };
 
+/** Map a file path's extension to a markdown code fence language identifier. */
 export function langFromPath(filePath: string): string {
   const dot = filePath.lastIndexOf(".");
   if (dot === -1) return "";
   return EXT_TO_LANG[filePath.slice(dot)] ?? "";
 }
 
-// ---- Context Helpers ----
-
+/** Compute context window usage as an integer percentage of the cap. */
 export function computeContextPct(tokens: TokenUsage, contextCap: number): number {
   if (contextCap <= 0) return 0;
   return Math.round(((tokens.input + tokens.output) / contextCap) * 100);
 }
 
+/** Format a context cap as a compact label (e.g. 200000 -> "200K", 1000000 -> "1M"). */
 export function contextCapLabel(cap: number): string {
   if (cap >= 1_000_000 && cap % 1_000_000 === 0) return `${cap / 1_000_000}M`;
   return `${Math.round(cap / 1_000)}K`;
 }
 
+/** Return a YAML frontmatter line for the Claude Code version, or empty string if absent. */
 export function formatCcVersionYaml(ccVersion?: string): string {
   if (!ccVersion) return "";
   return `\ncc_version: "${ccVersion}"`;

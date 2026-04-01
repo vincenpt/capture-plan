@@ -26,8 +26,7 @@ import {
   toSlug,
 } from "./shared.ts";
 
-// ---- Types ----
-
+/** Metadata for a plan file discovered in ~/.claude/plans/, including import status. */
 export interface PlanInfo {
   sourceSlug: string; // e.g., "abundant-juggling-petal"
   sourcePath: string; // ~/.claude/plans/abundant-juggling-petal.md
@@ -40,6 +39,7 @@ export interface PlanInfo {
   isImported: boolean; // true if source_slug already in vault
 }
 
+/** Summary of a backport run: counts of scanned, skipped, and created plans plus any errors. */
 export interface BackportResult {
   scanned: number;
   skipped: number;
@@ -65,8 +65,6 @@ interface CliArgs {
   cwd?: string;
 }
 
-// ---- Injectable paths for testing ----
-
 let PLANS_DIR = join(homedir(), ".claude", "plans");
 let PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
@@ -80,8 +78,7 @@ export function _setProjectsDirForTest(dir: string): void {
   PROJECTS_DIR = dir;
 }
 
-// ---- CLI Argument Parsing ----
-
+/** Parse CLI arguments into structured options for the backport command. */
 export function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = { list: false, all: false, dryRun: false, skipSummarize: false };
   for (let i = 0; i < argv.length; i++) {
@@ -99,8 +96,7 @@ export function parseArgs(argv: string[]): CliArgs {
   return args;
 }
 
-// ---- Slug-to-Project Resolution ----
-
+/** Scan JSONL session files to build a map from plan slug to its originating project cwd. */
 export function buildSlugProjectMap(): Map<string, string> {
   const map = new Map<string, string>();
   for (const dir of safeReaddir(PROJECTS_DIR)) {
@@ -130,12 +126,11 @@ export function buildSlugProjectMap(): Map<string, string> {
   return map;
 }
 
-// ---- Vault Dedup ----
-
 const PLAN_DIR_PATTERN = /^(\d{3,})-(.+)$/;
 const DATE_DIR_PATTERN = /^(\d{2})-(\d{2})$/;
 const YEAR_DIR_PATTERN = /^\d{4}$/;
 
+/** Scan existing vault plan notes to collect source_slug values, used to deduplicate imports. */
 export function getImportedSlugs(vaultPath: string, planPathRelative: string): Set<string> {
   const imported = new Set<string>();
   const basePath = join(vaultPath, planPathRelative);
@@ -165,8 +160,7 @@ export function getImportedSlugs(vaultPath: string, planPathRelative: string): S
   return imported;
 }
 
-// ---- Plan Discovery ----
-
+/** Discover all plan files in ~/.claude/plans/, resolving their project and import status. */
 export function discoverPlans(
   vaultPath: string,
   planPathRelative: string,
@@ -213,8 +207,7 @@ export function discoverPlans(
   return plans;
 }
 
-// ---- Filtering ----
-
+/** Apply date range, project, and slug filters to a list of discovered plans. */
 export function filterPlans(plans: PlanInfo[], args: CliArgs): PlanInfo[] {
   let filtered = plans;
 
@@ -238,8 +231,6 @@ export function filterPlans(plans: PlanInfo[], args: CliArgs): PlanInfo[] {
   return filtered;
 }
 
-// ---- Backport ----
-
 const PLAN_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given an engineering plan, output exactly two lines:
 Line 1: A 1-2 sentence summary (max 200 chars). Be specific about what will be built or changed.
 Line 2: 1-2 lowercase kebab-case tags relevant to the plan topic (comma-separated, no # prefix).
@@ -257,6 +248,7 @@ function fallbackSummary(content: string): string {
   );
 }
 
+/** Import selected plans into the Obsidian vault, creating notes and journal entries. Skips already-imported plans. */
 export async function backportPlans(
   plans: PlanInfo[],
   vaultPath: string,
@@ -351,8 +343,6 @@ ${stripTitleLine(content)}
   return result;
 }
 
-// ---- Helpers ----
-
 function safeReaddir(path: string): string[] {
   try {
     return readdirSync(path);
@@ -368,8 +358,6 @@ function isDir(path: string): boolean {
     return false;
   }
 }
-
-// ---- Main ----
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));

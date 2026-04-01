@@ -7,8 +7,6 @@ import { getDatePartsFor } from "./dates.ts";
 import { createVaultNote, getVaultPath } from "./obsidian.ts";
 import type { Config, PlanFrontmatter, SessionState } from "./types.ts";
 
-// ---- Session State (Vault-based) ----
-
 const STALE_STATE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 function serializeStateToFrontmatter(state: SessionState): string {
@@ -32,6 +30,7 @@ function serializeStateToFrontmatter(state: SessionState): string {
   return lines.join("\n");
 }
 
+/** Parse a SessionState from the YAML frontmatter of a vault state note. Returns null if missing or malformed. */
 export function parseStateFromFrontmatter(content: string): SessionState | null {
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
   if (!fmMatch) return null;
@@ -76,11 +75,13 @@ export function parseStateFromFrontmatter(content: string): SessionState | null 
   return state;
 }
 
+/** Persist session state as a frontmatter-only vault note for the Stop hook to discover. */
 export function writeVaultState(state: SessionState, vault?: string): boolean {
   const content = serializeStateToFrontmatter(state);
   return createVaultNote(`${state.plan_dir}/state`, content, vault).success;
 }
 
+/** Scan today's and yesterday's plan directories for a matching session state file, cleaning up stale entries. */
 export function scanForVaultState(sessionId: string, config: Config): SessionState | null {
   const vaultPath = getVaultPath(config.vault);
   if (!vaultPath) return null;
@@ -134,6 +135,7 @@ export function scanForVaultState(sessionId: string, config: Config): SessionSta
   return match;
 }
 
+/** Remove the state.md file from a plan directory after the Stop hook has consumed it. */
 export function deleteVaultState(planDir: string, vaultPath: string): void {
   try {
     unlinkSync(join(vaultPath, planDir, "state.md"));
@@ -142,8 +144,7 @@ export function deleteVaultState(planDir: string, vaultPath: string): void {
   }
 }
 
-// ---- Plan Frontmatter Parsing ----
-
+/** Extract structured fields (created, tags, counter, etc.) from a plan note's YAML frontmatter. */
 export function parsePlanFrontmatter(content: string): PlanFrontmatter {
   const result: PlanFrontmatter = {};
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
@@ -190,8 +191,7 @@ export function parsePlanFrontmatter(content: string): PlanFrontmatter {
   return result;
 }
 
-// ---- Journal Section Append ----
-
+/** Append a markdown table row beneath an existing plan section header in the journal file. */
 export async function appendRowToJournalSection(
   planTitle: string,
   tableRow: string,

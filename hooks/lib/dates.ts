@@ -1,7 +1,6 @@
 // dates.ts — Date/time helpers
 
-// ---- Date Helpers ----
-
+/** Structured date/time components used for building vault paths and frontmatter. */
 export type DateParts = {
   dd: string;
   mm: string;
@@ -16,12 +15,14 @@ export type DateParts = {
   ampmTime: string;
 };
 
+/** Format hours and minutes as a 12-hour AM/PM string (e.g. "2:05 PM"). */
 export function formatAmPm(hours: number, minutes: number): string {
   const period = hours >= 12 ? "PM" : "AM";
   const h = hours % 12 || 12;
   return `${h}:${String(minutes).padStart(2, "0")} ${period}`;
 }
 
+/** Extract all date/time components from a Date object for vault path and frontmatter construction. */
 export function getDatePartsFor(date: Date): DateParts {
   const dd = String(date.getDate()).padStart(2, "0");
   const mm = String(date.getMonth() + 1).padStart(2, "0");
@@ -45,12 +46,12 @@ export function getDatePartsFor(date: Date): DateParts {
   };
 }
 
+/** Extract date/time components for the current moment. */
 export function getDateParts(): DateParts {
   return getDatePartsFor(new Date());
 }
 
-// ---- Duration Formatting ----
-
+/** Format a millisecond duration as a human-readable string (e.g. "3m 12s", "1h 5m"). */
 export function formatDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
   if (totalSeconds < 60) return `${totalSeconds}s`;
