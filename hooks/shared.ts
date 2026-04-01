@@ -889,6 +889,16 @@ ${body}
 
 // ---- Tool Log Formatting ----
 
+export interface AgentFileEntry {
+  path: string; // Obsidian vault path (no .md extension)
+  content: string; // raw prompt markdown
+}
+
+export interface ToolsLogResult {
+  markdown: string;
+  agentFiles: AgentFileEntry[];
+}
+
 const LARGE_CONTENT_KEYS = new Set(["old_string", "new_string"]);
 const ARG_MAX_LEN = 100;
 const ARG_PREVIEW_LEN = 60;
@@ -948,6 +958,7 @@ export function langFromPath(filePath: string): string {
 export function formatToolArgs(
   toolName: string,
   input: Record<string, unknown>,
+  opts?: { agentPromptLink?: string; errorMark?: string; skipDescription?: boolean },
 ): { table: string; codeFence: string } {
   const rows: [string, string][] = [];
   let codeFence = "";
@@ -957,6 +968,9 @@ export function formatToolArgs(
 
   for (const [key, val] of Object.entries(input)) {
     if (val === undefined || val === null) continue;
+
+    // Skip description for Agent when prompt link is shown (redundant)
+    if (key === "description" && opts?.skipDescription) continue;
 
     // Bash command → code fence, outside table
     if (key === "command" && typeof val === "string") {
@@ -1007,8 +1021,8 @@ export function formatToolArgs(
       if (LARGE_CONTENT_KEYS.has(key)) {
         display = `[${val.length} chars]`;
       } else if (key === "prompt" && toolName === "Agent") {
-        // Agent prompts: full text, no truncation
-        display = escapeTableCell(val);
+        // Agent prompts: link to separate file, or full text fallback
+        display = opts?.agentPromptLink ?? escapeTableCell(val);
       } else if (val.length > ARG_MAX_LEN) {
         display = escapeTableCell(`${val.slice(0, ARG_PREVIEW_LEN)}… [${val.length} total]`);
       } else {
@@ -1029,7 +1043,8 @@ export function formatToolArgs(
 
   let table = "";
   if (rows.length > 0) {
-    const header = `| ${toolName} | |`;
+    const displayName = toolName === "Agent" ? `**${toolName}**` : toolName;
+    const header = `| ${displayName}${opts?.errorMark ?? ""} | |`;
     const divider = "|---|---|";
     const body = rows.map(([k, v]) => `| ${k} | ${v} |`).join("\n");
     table = `${header}\n${divider}\n${body}`;
@@ -1068,7 +1083,7 @@ export function formatToolsLogContent(opts: {
   contextCap?: number;
   ccVersion?: string;
   model?: string;
-}): string | null {
+}): ToolsLogResult | null {
   const { planLog, execLog, planTitle, planDir, journalPath, datetime, project } = opts;
   if (!planLog && !execLog) return null;
 
@@ -1100,6 +1115,7 @@ export function formatToolsLogContent(opts: {
 
   // Body
   const sections: string[] = [];
+  const agentFiles: AgentFileEntry[] = [];
 
   const renderPhase = (heading: string, log: ToolLog): void => {
     if (sections.length > 0) sections.push("\n---\n");
@@ -1110,8 +1126,10 @@ export function formatToolsLogContent(opts: {
       const durLabel = formatTurnDuration(turn.durationMs);
       const tokLabel = `${formatNumber(turn.tokensIn)} in · ${formatNumber(turn.tokensOut)} out`;
       const sidechain = turn.isSidechain ? " 🔀" : "";
+      const toolNames = [...new Set(turn.tools.map((t) => t.name))].join(", ");
+      const toolLabel = toolNames ? `: ${toolNames}` : "";
       sections.push(
-        `### Turn ${turn.turnNumber} — ${tsLabel} (${durLabel} | ${tokLabel})${sidechain}\n`,
+        `### Turn ${turn.turnNumber}${toolLabel} — ${tsLabel} (${durLabel} | ${tokLabel})${sidechain}\n`,
       );
 
       if (turn.isSidechain && turn.agentId) {
@@ -1124,9 +1142,32 @@ export function formatToolsLogContent(opts: {
       }
 
       for (const tool of turn.tools) {
-        const { table, codeFence } = formatToolArgs(tool.name, tool.input);
-        const errorMark = tool.isError ? " ❌" : "";
-        sections.push(`**${tool.name}**${errorMark}\n`);
+        // Build Agent prompt link if applicable
+        let agentPromptLink: string | undefined;
+        let skipDescription = false;
+        if (tool.name === "Agent" && typeof tool.input.prompt === "string" && tool.input.prompt) {
+          const desc =
+            typeof tool.input.description === "string" && tool.input.description
+              ? tool.input.description
+              : "agent-prompt";
+          const agentType =
+            typeof tool.input.subagent_type === "string" && tool.input.subagent_type
+              ? tool.input.subagent_type.toLowerCase()
+              : "agent";
+          const titleSlug = toSlug(planTitle);
+          const filePath = `${planDir}/agents/${turn.turnNumber}-${agentType}-${titleSlug}`;
+          agentFiles.push({ path: filePath, content: tool.input.prompt });
+          const safeDesc = desc.replace(/[|[\]]/g, "");
+          agentPromptLink = `[[${filePath}\\|${safeDesc}]]`;
+          skipDescription = true;
+        }
+
+        const errorMark = tool.isError ? " ❌" : undefined;
+        const { table, codeFence } = formatToolArgs(tool.name, tool.input, {
+          agentPromptLink,
+          errorMark,
+          skipDescription,
+        });
         if (table) sections.push(`${table}\n`);
         if (codeFence) sections.push(`${codeFence}\n`);
       }
@@ -1139,13 +1180,16 @@ export function formatToolsLogContent(opts: {
 
   const body = sections.join("\n");
 
-  return `---
+  return {
+    markdown: `---
 ${fmLines.join("\n")}
 ---
 # Tool Log: ${planTitle}
 
 ${body}
-`;
+`,
+    agentFiles,
+  };
 }
 
 // ---- Transcript ----

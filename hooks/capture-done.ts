@@ -268,7 +268,7 @@ ${fileList}
     const planLog = planStats ? collectToolLog(entries, 0, exitIdx) : null;
     const execLog = transcriptStats ? collectToolLog(entries, exitIdx) : null;
 
-    const toolsLogContent = formatToolsLogContent({
+    const toolsLogResult = formatToolsLogContent({
       planLog,
       execLog,
       planTitle: state.plan_title,
@@ -281,9 +281,24 @@ ${fileList}
       model: transcriptStats?.model ?? planStats?.model,
     });
 
-    if (toolsLogContent) {
+    if (toolsLogResult) {
+      // Create agent prompt files
+      for (const agentFile of toolsLogResult.agentFiles) {
+        const escapedContent = agentFile.content.replace(/\n/g, "\\n");
+        const result = runObsidian(
+          ["create", `path=${agentFile.path}`, `content=${escapedContent}`, "silent"],
+          config.vault,
+        );
+        if (result.exitCode !== 0) {
+          debugLog(`Failed to create agent file: ${agentFile.path}\n`, DEBUG_LOG);
+        } else {
+          debugLog(`Agent prompt captured -> ${agentFile.path}.md\n`, DEBUG_LOG);
+        }
+      }
+
+      // Create tools-log.md
       const toolsLogPath = `${state.plan_dir}/tools-log`;
-      const escapedLogContent = toolsLogContent.replace(/\n/g, "\\n");
+      const escapedLogContent = toolsLogResult.markdown.replace(/\n/g, "\\n");
       const logResult = runObsidian(
         ["create", `path=${toolsLogPath}`, `content=${escapedLogContent}`, "silent"],
         config.vault,

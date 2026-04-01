@@ -3,7 +3,15 @@
 // Exercises: SessionStart → capture-plan (ExitPlanMode) → capture-done (Stop) → journal
 // Uses real Obsidian CLI and vault; synthetic transcript and payloads.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { contextHintPath } from "./capture-session-start.ts";
@@ -207,6 +215,48 @@ function buildTranscript(_sessionId: string, planContent: string): string {
         role: "user",
         content: [
           { type: "tool_result", tool_use_id: "tu_edit_1", content: "File edited successfully." },
+        ],
+      },
+    },
+    // Agent tool — tests agent prompt file extraction
+    {
+      type: "assistant",
+      timestamp: ts(192_000),
+      model: "claude-sonnet-4-20250514",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            name: "Agent",
+            id: "tu_agent_1",
+            input: {
+              subagent_type: "Explore",
+              description: "Verify widget integration",
+              prompt:
+                "# Widget Integration Check\n\nVerify that the widget component is properly integrated:\n\n1. Check imports in app.ts\n2. Confirm widget function is exported\n3. Look for test coverage",
+            },
+          },
+        ],
+        usage: {
+          input_tokens: 2800,
+          output_tokens: 150,
+          cache_read_input_tokens: 1800,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    },
+    {
+      type: "human",
+      timestamp: ts(185_000),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_agent_1",
+            content: "Widget integration verified. All imports and exports are correct.",
+          },
         ],
       },
     },
@@ -563,9 +613,42 @@ async function main(): Promise<void> {
   const toolsLogExists = existsSync(toolsLogFile);
   record("capture-done", "tools-log.md exists", toolsLogExists);
 
+  let logContent = "";
   if (toolsLogExists) {
-    const logContent = readFileSync(toolsLogFile, "utf8");
+    logContent = readFileSync(toolsLogFile, "utf8");
     record("capture-done", "tools-log has turns", logContent.includes("### Turn 1"));
+  }
+
+  // Validate agent prompt files
+  const agentsDir = join(planDirAbsolute, "agents");
+  const agentsDirExists = existsSync(agentsDir);
+  record("capture-done", "agents/ directory exists", agentsDirExists);
+
+  if (agentsDirExists) {
+    const agentFiles = readdirSync(agentsDir).filter((f) => f.endsWith(".md"));
+    record(
+      "capture-done",
+      "agent prompt file exists",
+      agentFiles.length > 0,
+      agentFiles.length > 0 ? agentFiles[0] : "no .md files in agents/",
+    );
+
+    if (agentFiles.length > 0) {
+      const agentContent = readFileSync(join(agentsDir, agentFiles[0]), "utf8");
+      record(
+        "capture-done",
+        "agent file has prompt content",
+        agentContent.includes("Widget Integration Check"),
+      );
+    }
+  }
+
+  if (toolsLogExists) {
+    record(
+      "capture-done",
+      "tools-log has agent wikilink",
+      logContent.includes("agents/") && logContent.includes("Verify widget integration"),
+    );
   }
 
   // Validate state.md cleaned up
@@ -619,7 +702,7 @@ async function main(): Promise<void> {
     console.log("Cleanup: skipped (--skip-clean)");
     console.log(`  Test artifacts preserved at: ${planDir}/`);
     console.log(
-      "  Browse in Obsidian: plan.md, summary.md, tools-stats.md, tools-log.md, test-log.md",
+      "  Browse in Obsidian: plan.md, summary.md, tools-stats.md, tools-log.md, agents/, test-log.md",
     );
   } else {
     console.log("Cleanup");

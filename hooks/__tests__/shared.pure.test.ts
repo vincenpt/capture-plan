@@ -1200,6 +1200,27 @@ describe("formatToolArgs", () => {
     const { table } = formatToolArgs("SomeTool", { glob: "*.tsx" });
     expect(table).toContain("| glob | `*.tsx` |");
   });
+
+  it("replaces Agent prompt with wikilink when agentPromptLink provided", () => {
+    const { table } = formatToolArgs(
+      "Agent",
+      { prompt: "Full markdown prompt content...", description: "Explore hooks" },
+      { agentPromptLink: "[[plan/agents/7-1-explore-hooks\\|Explore hooks]]" },
+    );
+    expect(table).toContain("[[plan/agents/7-1-explore-hooks\\|Explore hooks]]");
+    expect(table).not.toContain("Full markdown prompt content");
+  });
+
+  it("includes error mark in table header when provided", () => {
+    const { table } = formatToolArgs("Grep", { pattern: "hello" }, { errorMark: " ❌" });
+    expect(table).toContain("| Grep ❌ | |");
+  });
+
+  it("omits error mark from table header when not provided", () => {
+    const { table } = formatToolArgs("Grep", { pattern: "hello" });
+    expect(table).toContain("| Grep | |");
+    expect(table).not.toContain("❌");
+  });
 });
 
 // ---- formatToolsLogContent ----
@@ -1239,67 +1260,73 @@ describe("formatToolsLogContent", () => {
   });
 
   it("includes frontmatter with correct stats", () => {
-    const content = formatToolsLogContent({
+    const result = formatToolsLogContent({
       ...baseLogOpts,
       planLog: makeTurnLog(),
       execLog: null,
     });
-    expect(content).toContain("total_tool_calls: 2");
-    expect(content).toContain("total_errors: 1");
-    expect(content).toContain("total_turns: 1");
-    expect(content).toContain("planning_calls: 2");
-    expect(content).not.toContain("execution_calls:");
-    expect(content).toContain("project: test-project");
+    const md = result?.markdown ?? "";
+    expect(md).toContain("total_tool_calls: 2");
+    expect(md).toContain("total_errors: 1");
+    expect(md).toContain("total_turns: 1");
+    expect(md).toContain("planning_calls: 2");
+    expect(md).not.toContain("execution_calls:");
+    expect(md).toContain("project: test-project");
   });
 
   it("includes plan backlink in frontmatter", () => {
-    const content = formatToolsLogContent({
+    const result = formatToolsLogContent({
       ...baseLogOpts,
       planLog: makeTurnLog(),
       execLog: null,
     });
-    expect(content).toContain("[[Claude/Plans/2026/03-30/001-my-plan/plan|My Plan]]");
+    expect(result?.markdown).toContain("[[Claude/Plans/2026/03-30/001-my-plan/plan|My Plan]]");
   });
 
   it("renders planning phase with turn headers", () => {
-    const content = formatToolsLogContent({
+    const result = formatToolsLogContent({
       ...baseLogOpts,
       planLog: makeTurnLog(),
       execLog: null,
     });
-    expect(content).toContain("## Planning Phase");
-    expect(content).toContain("### Turn 1");
-    expect(content).toContain("3.0s");
-    expect(content).toContain("1,200 in");
-    expect(content).toContain("500 out");
+    const md = result?.markdown ?? "";
+    expect(md).toContain("## Planning Phase");
+    expect(md).toContain("### Turn 1: Read, Grep");
+    expect(md).toContain("3.0s");
+    expect(md).toContain("1,200 in");
+    expect(md).toContain("500 out");
   });
 
   it("renders justification as blockquote", () => {
-    const content = formatToolsLogContent({
+    const result = formatToolsLogContent({
       ...baseLogOpts,
       planLog: makeTurnLog(),
       execLog: null,
     });
-    expect(content).toContain("> Checking the implementation");
+    expect(result?.markdown).toContain("> Checking the implementation");
   });
 
-  it("renders tool entries as bold name with table args", () => {
-    const content = formatToolsLogContent({
+  it("renders tool names in heading and error mark in table header", () => {
+    const result = formatToolsLogContent({
       ...baseLogOpts,
       planLog: makeTurnLog(),
       execLog: null,
     });
-    expect(content).toContain("**Read**");
-    expect(content).toContain("| file_path | `/src/foo.ts` |");
-    expect(content).toContain("**Grep** ❌");
-    expect(content).toContain("| pattern | hello |");
-    // No numbered list
-    expect(content).not.toContain("1. **Read**");
-    expect(content).not.toContain("2. **Grep**");
+    const md = result?.markdown ?? "";
+    // Tool names in turn heading
+    expect(md).toContain("### Turn 1: Read, Grep");
+    // No bold tool name lines
+    expect(md).not.toContain("**Read**");
+    expect(md).not.toContain("**Grep**");
+    // Table args still present
+    expect(md).toContain("| file_path | `/src/foo.ts` |");
+    expect(md).toContain("| pattern | hello |");
+    // Error mark in table header
+    expect(md).toContain("| Grep ❌ | |");
   });
 
   it("renders both phases", () => {
-    const content = formatToolsLogContent({
+    const result = formatToolsLogContent({
       ...baseLogOpts,
       planLog: makeTurnLog(),
       execLog: makeTurnLog({
@@ -1319,11 +1346,12 @@ describe("formatToolsLogContent", () => {
         totalErrors: 0,
       }),
     });
-    expect(content).toContain("## Planning Phase");
-    expect(content).toContain("## Execution Phase");
-    expect(content).toContain("total_tool_calls: 3");
-    expect(content).toContain("planning_calls: 2");
-    expect(content).toContain("execution_calls: 1");
+    const md = result?.markdown ?? "";
+    expect(md).toContain("## Planning Phase");
+    expect(md).toContain("## Execution Phase");
+    expect(md).toContain("total_tool_calls: 3");
+    expect(md).toContain("planning_calls: 2");
+    expect(md).toContain("execution_calls: 1");
   });
 
   it("marks subagent turns with sidechain indicator", () => {
@@ -1344,41 +1372,138 @@ describe("formatToolsLogContent", () => {
       totalToolCalls: 1,
       totalErrors: 0,
     });
-    const content = formatToolsLogContent({
+    const result = formatToolsLogContent({
       ...baseLogOpts,
       planLog: null,
       execLog: log,
     });
-    expect(content).toContain("🔀");
-    expect(content).toContain("*Subagent: sub-1*");
+    const md = result?.markdown ?? "";
+    expect(md).toContain("🔀");
+    expect(md).toContain("*Subagent: sub-1*");
   });
 
   it("includes title in heading", () => {
-    const content = formatToolsLogContent({
+    const result = formatToolsLogContent({
       ...baseLogOpts,
       planLog: makeTurnLog(),
       execLog: null,
     });
-    expect(content).toContain("# Tool Log: My Plan");
+    expect(result?.markdown).toContain("# Tool Log: My Plan");
   });
 
   it("includes cc_version when provided", () => {
-    const content = formatToolsLogContent({
+    const result = formatToolsLogContent({
       ...baseLogOpts,
       planLog: makeTurnLog(),
       execLog: null,
       ccVersion: "1.0.30",
     });
-    expect(content).toContain('cc_version: "1.0.30"');
+    expect(result?.markdown).toContain('cc_version: "1.0.30"');
   });
 
   it("includes model when provided", () => {
-    const content = formatToolsLogContent({
+    const result = formatToolsLogContent({
       ...baseLogOpts,
       planLog: makeTurnLog(),
       execLog: null,
       model: "claude-opus-4-6",
     });
-    expect(content).toContain("model: claude-opus-4-6");
+    expect(result?.markdown).toContain("model: claude-opus-4-6");
+  });
+
+  it("returns empty agentFiles when no Agent tools present", () => {
+    const result = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: makeTurnLog(),
+      execLog: null,
+    });
+    expect(result?.agentFiles).toEqual([]);
+  });
+
+  it("collects agent files and replaces prompt with wikilink", () => {
+    const log: ToolLog = {
+      turns: [
+        {
+          turnNumber: 7,
+          timestamp: "2026-03-30T14:00:00.000Z",
+          durationMs: 5000,
+          tokensIn: 31167,
+          tokensOut: 1332,
+          justification: "",
+          tools: [
+            {
+              seq: 1,
+              name: "Agent",
+              input: {
+                subagent_type: "Plan",
+                description: "Explore hooks and config",
+                prompt: "# Full markdown\n\nWith **bold** and lists\n- item 1",
+              },
+              isError: false,
+            },
+          ],
+          isSidechain: false,
+        },
+      ],
+      totalToolCalls: 1,
+      totalErrors: 0,
+    };
+    const result = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: null,
+      execLog: log,
+    });
+    expect(result).not.toBeNull();
+    // Agent file collected
+    expect(result?.agentFiles).toHaveLength(1);
+    expect(result?.agentFiles[0].path).toBe(
+      "Claude/Plans/2026/03-30/001-my-plan/agents/7-plan-my-plan",
+    );
+    expect(result?.agentFiles[0].content).toContain("# Full markdown");
+    // Wikilink in markdown
+    expect(result?.markdown).toContain(
+      "[[Claude/Plans/2026/03-30/001-my-plan/agents/7-plan-my-plan\\|Explore hooks and config]]",
+    );
+    // Original prompt text NOT in markdown
+    expect(result?.markdown).not.toContain("With **bold** and lists");
+    // Description skipped when prompt link present
+    expect(result?.markdown).not.toContain("| description |");
+    // Agent table header is bolded
+    expect(result?.markdown).toContain("| **Agent** | |");
+    // Tool name in heading
+    expect(result?.markdown).toContain("### Turn 7: Agent");
+  });
+
+  it("uses fallback slug when Agent has no description", () => {
+    const log: ToolLog = {
+      turns: [
+        {
+          turnNumber: 3,
+          timestamp: "2026-03-30T14:00:00.000Z",
+          durationMs: 1000,
+          tokensIn: 100,
+          tokensOut: 50,
+          justification: "",
+          tools: [
+            {
+              seq: 1,
+              name: "Agent",
+              input: { prompt: "Do something" },
+              isError: false,
+            },
+          ],
+          isSidechain: false,
+        },
+      ],
+      totalToolCalls: 1,
+      totalErrors: 0,
+    };
+    const result = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: null,
+      execLog: log,
+    });
+    expect(result?.agentFiles[0].path).toContain("agents/3-agent-my-plan");
+    expect(result?.markdown).toContain("\\|agent-prompt]]");
   });
 });
