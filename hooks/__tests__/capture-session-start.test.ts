@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { parseModelContextCap } from "../capture-session-start.ts";
+import { parseCcVersion, parseModelContextCap } from "../capture-session-start.ts";
 
 describe("parseModelContextCap", () => {
   it("parses [1m] as 1M tokens", () => {
@@ -29,5 +29,31 @@ describe("parseModelContextCap", () => {
 
   it("returns undefined for empty string", () => {
     expect(parseModelContextCap("")).toBeUndefined();
+  });
+});
+
+describe("parseCcVersion", () => {
+  it("parses standard version output", () => {
+    expect(parseCcVersion("2.1.89 (Claude Code)\n")).toBe("v2.1.89");
+  });
+
+  it("parses version without suffix", () => {
+    expect(parseCcVersion("2.1.89\n")).toBe("v2.1.89");
+  });
+
+  it("parses version with extra whitespace", () => {
+    expect(parseCcVersion("  2.1.89 (Claude Code)  \n")).toBe("v2.1.89");
+  });
+
+  it("returns undefined for empty string", () => {
+    expect(parseCcVersion("")).toBeUndefined();
+  });
+
+  it("returns undefined for non-version output", () => {
+    expect(parseCcVersion("error: command not found")).toBeUndefined();
+  });
+
+  it("returns undefined for partial version", () => {
+    expect(parseCcVersion("2.1")).toBeUndefined();
   });
 });

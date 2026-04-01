@@ -22,6 +22,7 @@ export interface ContextHint {
   session_id: string;
   context_cap?: number;
   model?: string;
+  cc_version?: string;
   source: string;
 }
 
@@ -34,6 +35,25 @@ export function parseModelContextCap(model: string): number | undefined {
   if (unit === "m") return num * 1_000_000;
   if (unit === "k") return num * 1_000;
   return undefined;
+}
+
+/** Parse Claude Code version from `claude --version` output (e.g. "2.1.89 (Claude Code)"). */
+export function parseCcVersion(raw: string): string | undefined {
+  const match = raw.trim().match(/^(\d+\.\d+\.\d+)/);
+  return match ? `v${match[1]}` : undefined;
+}
+
+function detectCcVersion(): string | undefined {
+  try {
+    const result = Bun.spawnSync(["claude", "--version"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (result.exitCode !== 0) return undefined;
+    return parseCcVersion(result.stdout.toString());
+  } catch {
+    return undefined;
+  }
 }
 
 export function contextHintPath(sessionId: string): string {
@@ -64,10 +84,14 @@ async function main(): Promise<void> {
     // Priority: config override > model detection
     const contextCap = config.context_cap ?? detectedCap;
 
+    const ccVersion = detectCcVersion();
+    debugLog(`SessionStart cc_version=${ccVersion ?? "unknown"}\n`, DEBUG_LOG);
+
     const hint: ContextHint = {
       session_id: sessionId,
       context_cap: contextCap,
       model: payload.model,
+      cc_version: ccVersion,
       source: payload.source ?? "unknown",
     };
 

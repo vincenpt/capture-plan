@@ -636,17 +636,33 @@ export function contextCapLabel(cap: number): string {
   return `${Math.round(cap / 1_000)}K`;
 }
 
-export function readContextHint(sessionId: string): number | undefined {
+export interface ContextHintResult {
+  context_cap?: number;
+  cc_version?: string;
+}
+
+export function readContextHint(sessionId: string): ContextHintResult {
   try {
     const hintFile = join(tmpdir(), `capture-plan-context-${sessionId}.json`);
     const raw = readFileSync(hintFile, "utf8");
-    const hint = JSON.parse(raw) as { context_cap?: number };
-    return typeof hint.context_cap === "number" && hint.context_cap > 0
-      ? hint.context_cap
-      : undefined;
+    const hint = JSON.parse(raw) as { context_cap?: number; cc_version?: string };
+    return {
+      context_cap:
+        typeof hint.context_cap === "number" && hint.context_cap > 0 ? hint.context_cap : undefined,
+      cc_version: typeof hint.cc_version === "string" ? hint.cc_version : undefined,
+    };
   } catch {
-    return undefined;
+    return {};
   }
+}
+
+export function readCcVersion(sessionId: string): string | undefined {
+  return readContextHint(sessionId).cc_version;
+}
+
+export function formatCcVersionYaml(ccVersion?: string): string {
+  if (!ccVersion) return "";
+  return `\ncc_version: "${ccVersion}"`;
 }
 
 export function resolveContextCap(
@@ -656,8 +672,8 @@ export function resolveContextCap(
 ): number {
   if (configCap && configCap > 0) return configCap;
   if (sessionId) {
-    const hintCap = readContextHint(sessionId);
-    if (hintCap) return hintCap;
+    const hint = readContextHint(sessionId);
+    if (hint.context_cap) return hint.context_cap;
   }
   if (peakContext > DEFAULT_CONTEXT_CAP) return 1_000_000;
   return DEFAULT_CONTEXT_CAP;
@@ -780,6 +796,7 @@ export function formatToolsNoteContent(opts: {
   datetime: string;
   project?: string;
   contextCap?: number;
+  ccVersion?: string;
 }): string | null {
   const { planStats, execStats, planTitle, planDir, journalPath, datetime, project, contextCap } =
     opts;
@@ -826,9 +843,11 @@ export function formatToolsNoteContent(opts: {
 
   const body = sections.join("\n");
 
+  const ccVersionYaml = formatCcVersionYaml(opts.ccVersion);
+
   return `---
 created: "[[${journalPath}|${datetime}]]"
-plan: "[[${planDir}/plan|${planTitle.replace(/"/g, '\\"')}]]"${project ? `\nproject: ${project}` : ""}
+plan: "[[${planDir}/plan|${planTitle.replace(/"/g, '\\"')}]]"${project ? `\nproject: ${project}` : ""}${ccVersionYaml}
 ${statsYaml}
 ---
 # Session Tools: ${planTitle}

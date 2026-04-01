@@ -4,6 +4,7 @@ import {
   contextCapLabel,
   extractTitle,
   formatAmPm,
+  formatCcVersionYaml,
   formatDuration,
   formatModelYaml,
   formatNumber,
@@ -796,6 +797,22 @@ describe("mergeTranscriptStats", () => {
   });
 });
 
+// ---- formatCcVersionYaml ----
+
+describe("formatCcVersionYaml", () => {
+  it("returns cc_version line with newline prefix", () => {
+    expect(formatCcVersionYaml("v2.1.89")).toBe('\ncc_version: "v2.1.89"');
+  });
+
+  it("returns empty string for undefined", () => {
+    expect(formatCcVersionYaml(undefined)).toBe("");
+  });
+
+  it("returns empty string for empty string", () => {
+    expect(formatCcVersionYaml("")).toBe("");
+  });
+});
+
 // ---- formatToolsNoteContent ----
 
 describe("formatToolsNoteContent", () => {
@@ -927,5 +944,24 @@ describe("formatToolsNoteContent", () => {
       contextCap: 1_000_000,
     });
     expect(content).toContain("model: claude-opus-4-6 (1M)");
+  });
+
+  it("includes cc_version in frontmatter when provided", () => {
+    const content = formatToolsNoteContent({
+      ...baseOpts,
+      planStats,
+      execStats: null,
+      ccVersion: "v2.1.89",
+    });
+    expect(content).toContain('cc_version: "v2.1.89"');
+  });
+
+  it("omits cc_version when not provided", () => {
+    const content = formatToolsNoteContent({
+      ...baseOpts,
+      planStats,
+      execStats: null,
+    });
+    expect(content).not.toContain("cc_version");
   });
 });

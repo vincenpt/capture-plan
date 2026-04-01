@@ -9,6 +9,7 @@ import {
   debugLog,
   deleteVaultState,
   findTranscriptPath,
+  formatCcVersionYaml,
   formatDuration,
   formatModelYaml,
   formatTagsYaml,
@@ -20,6 +21,7 @@ import {
   loadConfig,
   mergeTags,
   mergeTagsOnDailyNote,
+  readCcVersion,
   resolveContextCap,
   runObsidian,
   scanForVaultState,
@@ -199,11 +201,13 @@ async function main(): Promise<void> {
       sessionId,
     );
     const modelYaml = formatModelYaml(transcriptStats, contextCap);
+    const ccVersion = readCcVersion(sessionId);
+    const ccVersionYaml = formatCcVersionYaml(ccVersion);
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
 plan: "[[${state.plan_dir}/plan|${state.plan_title.replace(/"/g, '\\"')}]]"
-duration: "${duration}"${modelYaml}
+duration: "${duration}"${ccVersionYaml}${modelYaml}
 ---
 # Done: ${state.plan_title}
 
@@ -241,6 +245,7 @@ ${fileList}
       datetime,
       project,
       contextCap,
+      ccVersion,
     });
 
     if (toolsNoteContent) {

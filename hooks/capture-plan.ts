@@ -8,6 +8,7 @@ import {
   debugLog,
   extractTitle,
   findTranscriptPath,
+  formatCcVersionYaml,
   formatModelYaml,
   formatTagsYaml,
   getDateParts,
@@ -18,6 +19,7 @@ import {
   mergeTagsOnDailyNote,
   nextCounter,
   padCounter,
+  readCcVersion,
   resolveContextCap,
   runObsidian,
   type SessionState,
@@ -153,10 +155,11 @@ async function main(): Promise<void> {
       sessionId,
     );
     const modelYaml = formatModelYaml(stats, contextCap);
+    const ccVersionYaml = formatCcVersionYaml(readCcVersion(sessionId));
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-session: "[[Sessions/${shortSessionId(sessionId)}]]"${modelYaml}
+session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
 ---
 # ${title}
 
