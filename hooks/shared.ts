@@ -4,7 +4,13 @@
 import { appendFileSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import type { McpServerInfo, TokenUsage, ToolUseRecord, TranscriptStats } from "./transcript.ts";
+import type {
+  McpServerInfo,
+  TokenUsage,
+  ToolLog,
+  ToolUseRecord,
+  TranscriptStats,
+} from "./transcript.ts";
 
 // ---- Types ----
 
@@ -97,7 +103,10 @@ export function runObsidian(args: string[], vault?: string): { stdout: string; e
   try {
     const cmd = vault ? ["obsidian", `vault=${vault}`, ...args] : ["obsidian", ...args];
     const result = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe" });
-    return { stdout: result.stdout.toString().trim(), exitCode: result.exitCode };
+    const stdout = result.stdout.toString().trim();
+    // Obsidian CLI returns exitCode 0 even on errors — detect via stdout
+    const exitCode = result.exitCode !== 0 || stdout.startsWith("Error:") ? 1 : 0;
+    return { stdout, exitCode };
   } catch {
     return { stdout: "", exitCode: 1 };
   }
@@ -851,6 +860,166 @@ plan: "[[${planDir}/plan|${planTitle.replace(/"/g, '\\"')}]]"${project ? `\nproj
 ${statsYaml}
 ---
 # Session Tools: ${planTitle}
+
+${body}
+`;
+}
+
+// ---- Tool Log Formatting ----
+
+const LARGE_CONTENT_KEYS = new Set(["content", "old_string", "new_string", "code"]);
+const ARG_MAX_LEN = 100;
+const ARG_PREVIEW_LEN = 60;
+
+export function formatToolArgs(input: Record<string, unknown>): string {
+  const lines: string[] = [];
+  let commandFence = "";
+
+  for (const [key, val] of Object.entries(input)) {
+    if (val === undefined || val === null) continue;
+
+    // Bash command → code fence, rendered last
+    if (key === "command" && typeof val === "string") {
+      commandFence = `\`\`\`sh\n${val}\n\`\`\``;
+      continue;
+    }
+
+    let display: string;
+    if (typeof val === "string") {
+      if (LARGE_CONTENT_KEYS.has(key)) {
+        display = `[${val.length} chars]`;
+      } else if (val.length > ARG_MAX_LEN) {
+        display = `${val.slice(0, ARG_PREVIEW_LEN)}… [${val.length} total]`;
+      } else {
+        display = val;
+      }
+    } else if (typeof val === "boolean" || typeof val === "number") {
+      display = String(val);
+    } else {
+      const json = JSON.stringify(val);
+      display =
+        json.length > ARG_MAX_LEN
+          ? `${json.slice(0, ARG_PREVIEW_LEN)}… [${json.length} total]`
+          : json;
+    }
+    lines.push(`- ${key}: ${display}`);
+  }
+
+  if (commandFence) lines.push(commandFence);
+
+  return lines.join("\n");
+}
+
+function formatTimestamp(isoTs: string): string {
+  try {
+    const d = new Date(isoTs);
+    const h = d.getHours();
+    const m = String(d.getMinutes()).padStart(2, "0");
+    const s = String(d.getSeconds()).padStart(2, "0");
+    const ampm = h >= 12 ? "PM" : "AM";
+    const h12 = h % 12 || 12;
+    return `${h12}:${m}:${s} ${ampm}`;
+  } catch {
+    return isoTs;
+  }
+}
+
+function formatTurnDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+export function formatToolsLogContent(opts: {
+  planLog: ToolLog | null;
+  execLog: ToolLog | null;
+  planTitle: string;
+  planDir: string;
+  journalPath: string;
+  datetime: string;
+  project?: string;
+  contextCap?: number;
+  ccVersion?: string;
+  model?: string;
+}): string | null {
+  const { planLog, execLog, planTitle, planDir, journalPath, datetime, project } = opts;
+  if (!planLog && !execLog) return null;
+
+  const totalCalls = (planLog?.totalToolCalls ?? 0) + (execLog?.totalToolCalls ?? 0);
+  const totalErrors = (planLog?.totalErrors ?? 0) + (execLog?.totalErrors ?? 0);
+  const totalTurns = (planLog?.turns.length ?? 0) + (execLog?.turns.length ?? 0);
+
+  // Compute total duration from all turns
+  const allTurns = [...(planLog?.turns ?? []), ...(execLog?.turns ?? [])];
+  const totalDurationMs = allTurns.reduce((sum, t) => sum + t.durationMs, 0);
+  const totalTokensIn = allTurns.reduce((sum, t) => sum + t.tokensIn, 0);
+  const totalTokensOut = allTurns.reduce((sum, t) => sum + t.tokensOut, 0);
+
+  // Frontmatter
+  const fmLines: string[] = [];
+  fmLines.push(`created: "[[${journalPath}|${datetime}]]"`);
+  fmLines.push(`plan: "[[${planDir}/plan|${planTitle.replace(/"/g, '\\"')}]]"`);
+  if (project) fmLines.push(`project: ${project}`);
+  if (opts.ccVersion) fmLines.push(`cc_version: "${opts.ccVersion}"`);
+  if (opts.model) fmLines.push(`model: ${opts.model}`);
+  fmLines.push(`total_tool_calls: ${totalCalls}`);
+  fmLines.push(`total_errors: ${totalErrors}`);
+  fmLines.push(`total_turns: ${totalTurns}`);
+  if (planLog) fmLines.push(`planning_calls: ${planLog.totalToolCalls}`);
+  if (execLog) fmLines.push(`execution_calls: ${execLog.totalToolCalls}`);
+  fmLines.push(`duration: "${formatDuration(totalDurationMs)}"`);
+  fmLines.push(`tokens_in: ${totalTokensIn}`);
+  fmLines.push(`tokens_out: ${totalTokensOut}`);
+
+  // Body
+  const sections: string[] = [];
+
+  const renderPhase = (heading: string, log: ToolLog): void => {
+    if (sections.length > 0) sections.push("\n---\n");
+    sections.push(`## ${heading}\n`);
+
+    for (const turn of log.turns) {
+      const tsLabel = turn.timestamp ? formatTimestamp(turn.timestamp) : `Turn ${turn.turnNumber}`;
+      const durLabel = formatTurnDuration(turn.durationMs);
+      const tokLabel = `${formatNumber(turn.tokensIn)} in · ${formatNumber(turn.tokensOut)} out`;
+      const sidechain = turn.isSidechain ? " 🔀" : "";
+      sections.push(
+        `### Turn ${turn.turnNumber} — ${tsLabel} (${durLabel} | ${tokLabel})${sidechain}\n`,
+      );
+
+      if (turn.isSidechain && turn.agentId) {
+        sections.push(`> *Subagent: ${turn.agentId}*\n`);
+      }
+
+      if (turn.justification) {
+        const justLines = turn.justification.split("\n").map((l) => `> ${l}`);
+        sections.push(`${justLines.join("\n")}\n`);
+      }
+
+      for (const tool of turn.tools) {
+        const args = formatToolArgs(tool.input);
+        const errorMark = tool.isError ? " ❌" : "";
+        sections.push(`${tool.seq}. **${tool.name}**${errorMark}`);
+        if (args) {
+          const indented = args
+            .split("\n")
+            .map((l) => `    ${l}`)
+            .join("\n");
+          sections.push(indented);
+        }
+      }
+      sections.push("");
+    }
+  };
+
+  if (planLog && planLog.turns.length > 0) renderPhase("Planning Phase", planLog);
+  if (execLog && execLog.turns.length > 0) renderPhase("Execution Phase", execLog);
+
+  const body = sections.join("\n");
+
+  return `---
+${fmLines.join("\n")}
+---
+# Tool Log: ${planTitle}
 
 ${body}
 `;

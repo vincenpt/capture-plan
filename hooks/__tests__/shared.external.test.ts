@@ -71,6 +71,25 @@ describe("runObsidian", () => {
     expect(result.stdout).toBe("trimmed");
   });
 
+  it("returns exitCode 1 when stdout starts with Error:", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: 'Error: File "test.md" not found.', exitCode: 0 }),
+    );
+
+    const result = runObsidian(["append", "path=test.md"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('Error: File "test.md" not found.');
+  });
+
+  it("preserves original non-zero exitCode", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ exitCode: 2, success: false }),
+    );
+
+    const result = runObsidian(["test"]);
+    expect(result.exitCode).toBe(1);
+  });
+
   it("returns exitCode 1 on spawn failure", () => {
     spawnSyncSpy = spyOn(Bun, "spawnSync").mockImplementation(() => {
       throw new Error("spawn failed");

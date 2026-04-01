@@ -54,6 +54,31 @@ export interface McpServerInfo {
   calls: number;
 }
 
+export interface ToolLogEntry {
+  seq: number;
+  name: string;
+  input: Record<string, unknown>;
+  isError: boolean;
+}
+
+export interface TurnLogEntry {
+  turnNumber: number;
+  timestamp: string;
+  durationMs: number;
+  tokensIn: number;
+  tokensOut: number;
+  justification: string;
+  tools: ToolLogEntry[];
+  isSidechain: boolean;
+  agentId?: string;
+}
+
+export interface ToolLog {
+  turns: TurnLogEntry[];
+  totalToolCalls: number;
+  totalErrors: number;
+}
+
 export interface TranscriptStats {
   model: string;
   durationMs: number;
@@ -430,6 +455,92 @@ export function collectTranscriptStats(
     tools,
     mcpServers,
     totalToolCalls: totalCalls,
+    totalErrors,
+  };
+}
+
+export function collectToolLog(
+  entries: TranscriptEntry[],
+  startIdx?: number,
+  endIdx?: number,
+): ToolLog {
+  const [start, end] = resolveRange(entries, startIdx, endIdx);
+
+  const turns: TurnLogEntry[] = [];
+  let seq = 0;
+  let turnNumber = 0;
+  let totalErrors = 0;
+
+  for (let i = start; i <= end; i++) {
+    const entry = entries[i];
+    if (entry.type !== "assistant") continue;
+
+    const blocks = getContentBlocks(entry);
+    const toolBlocks = blocks.filter((b) => b.type === "tool_use" && b.name);
+    if (toolBlocks.length === 0) continue;
+
+    turnNumber++;
+
+    // Collect justification: text blocks before the first tool_use
+    const justParts: string[] = [];
+    for (const block of blocks) {
+      if (block.type === "tool_use") break;
+      if (block.type === "text" && block.text) justParts.push(block.text);
+    }
+
+    // Build error map from next human entry
+    const errorIds = new Set<string>();
+    if (i + 1 <= end && entries[i + 1].type === "human") {
+      for (const block of getUserContentBlocks(entries[i + 1])) {
+        if (block.type === "tool_result" && block.is_error && block.tool_use_id) {
+          errorIds.add(block.tool_use_id);
+        }
+      }
+    }
+
+    // Build tool log entries
+    const tools: ToolLogEntry[] = [];
+    for (const block of toolBlocks) {
+      seq++;
+      const isError = block.id ? errorIds.has(block.id) : false;
+      if (isError) totalErrors++;
+      tools.push({
+        seq,
+        name: block.name as string,
+        input: block.input ?? {},
+        isError,
+      });
+    }
+
+    // Compute duration to next entry
+    let durationMs = 0;
+    const thisTs = entry.timestamp;
+    const nextTs = i + 1 <= end ? entries[i + 1]?.timestamp : undefined;
+    if (thisTs && nextTs) {
+      durationMs = Math.max(0, new Date(nextTs).getTime() - new Date(thisTs).getTime());
+    }
+
+    // Extract token usage
+    const usage = entry.message?.usage;
+    const tokensIn = (usage?.input_tokens ?? 0) + (usage?.cache_read_input_tokens ?? 0);
+    const tokensOut = usage?.output_tokens ?? 0;
+
+    turns.push({
+      turnNumber,
+      timestamp: entry.timestamp ?? "",
+      durationMs,
+      tokensIn,
+      tokensOut,
+      justification: justParts.join("\n\n"),
+      tools,
+      isSidechain: entry.isSidechain ?? false,
+      agentId: entry.agentId,
+    });
+  }
+
+  return {
+    turns,
+    totalToolCalls: seq,
     totalErrors,
   };
 }

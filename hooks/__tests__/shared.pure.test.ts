@@ -10,6 +10,8 @@ import {
   formatNumber,
   formatStatsYaml,
   formatTagsYaml,
+  formatToolArgs,
+  formatToolsLogContent,
   formatToolsNoteContent,
   formatToolTable,
   getDatePartsFor,
@@ -24,7 +26,7 @@ import {
   stripTitleLine,
   toSlug,
 } from "../shared.ts";
-import type { TranscriptStats } from "../transcript.ts";
+import type { ToolLog, TranscriptStats } from "../transcript.ts";
 
 // ---- extractTitle ----
 
@@ -963,5 +965,249 @@ describe("formatToolsNoteContent", () => {
       execStats: null,
     });
     expect(content).not.toContain("cc_version");
+  });
+});
+
+// ---- formatToolArgs ----
+
+describe("formatToolArgs", () => {
+  it("formats simple string args as bullet lines", () => {
+    const result = formatToolArgs({ file_path: "/src/foo.ts" });
+    expect(result).toBe("- file_path: /src/foo.ts");
+  });
+
+  it("puts each arg on its own bullet line", () => {
+    const result = formatToolArgs({ pattern: "hello", path: "/src" });
+    expect(result).toBe("- pattern: hello\n- path: /src");
+  });
+
+  it("truncates long string values", () => {
+    const longVal = "a".repeat(150);
+    const result = formatToolArgs({ description: longVal });
+    expect(result).toContain("a".repeat(60));
+    expect(result).toContain("… [150 total]");
+  });
+
+  it("shows length only for known large-content keys", () => {
+    const result = formatToolArgs({ content: "x".repeat(50) });
+    expect(result).toBe("- content: [50 chars]");
+  });
+
+  it("shows length only for old_string and new_string", () => {
+    const result = formatToolArgs({
+      old_string: "original code here",
+      new_string: "replacement code here",
+    });
+    expect(result).toContain("- old_string: [18 chars]");
+    expect(result).toContain("- new_string: [21 chars]");
+  });
+
+  it("handles boolean and number values", () => {
+    const result = formatToolArgs({ multiline: true, offset: 42 });
+    expect(result).toBe("- multiline: true\n- offset: 42");
+  });
+
+  it("handles object values with JSON stringification", () => {
+    const result = formatToolArgs({ options: { a: 1 } });
+    expect(result).toBe('- options: {"a":1}');
+  });
+
+  it("skips null and undefined values", () => {
+    const result = formatToolArgs({ file_path: "/src/foo.ts", extra: null, missing: undefined });
+    expect(result).toBe("- file_path: /src/foo.ts");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(formatToolArgs({})).toBe("");
+  });
+
+  it("renders command as sh code fence", () => {
+    const result = formatToolArgs({ command: "bun test 2>&1 | tail -30" });
+    expect(result).toBe("```sh\nbun test 2>&1 | tail -30\n```");
+  });
+
+  it("renders command code fence after other args", () => {
+    const result = formatToolArgs({
+      command: "ls -la",
+      description: "List files",
+      timeout: 30000,
+    });
+    expect(result).toBe("- description: List files\n- timeout: 30000\n```sh\nls -la\n```");
+  });
+});
+
+// ---- formatToolsLogContent ----
+
+describe("formatToolsLogContent", () => {
+  const baseLogOpts = {
+    planTitle: "My Plan",
+    planDir: "Claude/Plans/2026/03-30/001-my-plan",
+    journalPath: "Daily/2026/03-30",
+    datetime: "2026-03-30 2:00 PM",
+    project: "test-project",
+  };
+
+  const makeTurnLog = (overrides?: Partial<ToolLog>): ToolLog => ({
+    turns: [
+      {
+        turnNumber: 1,
+        timestamp: "2026-03-30T14:00:00.000Z",
+        durationMs: 3000,
+        tokensIn: 1200,
+        tokensOut: 500,
+        justification: "Checking the implementation",
+        tools: [
+          { seq: 1, name: "Read", input: { file_path: "/src/foo.ts" }, isError: false },
+          { seq: 2, name: "Grep", input: { pattern: "hello" }, isError: true },
+        ],
+        isSidechain: false,
+      },
+    ],
+    totalToolCalls: 2,
+    totalErrors: 1,
+    ...overrides,
+  });
+
+  it("returns null when both phases are null", () => {
+    expect(formatToolsLogContent({ ...baseLogOpts, planLog: null, execLog: null })).toBeNull();
+  });
+
+  it("includes frontmatter with correct stats", () => {
+    const content = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: makeTurnLog(),
+      execLog: null,
+    });
+    expect(content).toContain("total_tool_calls: 2");
+    expect(content).toContain("total_errors: 1");
+    expect(content).toContain("total_turns: 1");
+    expect(content).toContain("planning_calls: 2");
+    expect(content).not.toContain("execution_calls:");
+    expect(content).toContain("project: test-project");
+  });
+
+  it("includes plan backlink in frontmatter", () => {
+    const content = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: makeTurnLog(),
+      execLog: null,
+    });
+    expect(content).toContain("[[Claude/Plans/2026/03-30/001-my-plan/plan|My Plan]]");
+  });
+
+  it("renders planning phase with turn headers", () => {
+    const content = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: makeTurnLog(),
+      execLog: null,
+    });
+    expect(content).toContain("## Planning Phase");
+    expect(content).toContain("### Turn 1");
+    expect(content).toContain("3.0s");
+    expect(content).toContain("1,200 in");
+    expect(content).toContain("500 out");
+  });
+
+  it("renders justification as blockquote", () => {
+    const content = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: makeTurnLog(),
+      execLog: null,
+    });
+    expect(content).toContain("> Checking the implementation");
+  });
+
+  it("renders tool entries with sequential numbers and bulleted args", () => {
+    const content = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: makeTurnLog(),
+      execLog: null,
+    });
+    expect(content).toContain("1. **Read**\n    - file_path: /src/foo.ts");
+    expect(content).toContain("2. **Grep** ❌\n    - pattern: hello");
+  });
+
+  it("renders both phases", () => {
+    const content = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: makeTurnLog(),
+      execLog: makeTurnLog({
+        turns: [
+          {
+            turnNumber: 1,
+            timestamp: "2026-03-30T14:05:00.000Z",
+            durationMs: 1000,
+            tokensIn: 500,
+            tokensOut: 200,
+            justification: "",
+            tools: [{ seq: 3, name: "Edit", input: { file_path: "a.ts" }, isError: false }],
+            isSidechain: false,
+          },
+        ],
+        totalToolCalls: 1,
+        totalErrors: 0,
+      }),
+    });
+    expect(content).toContain("## Planning Phase");
+    expect(content).toContain("## Execution Phase");
+    expect(content).toContain("total_tool_calls: 3");
+    expect(content).toContain("planning_calls: 2");
+    expect(content).toContain("execution_calls: 1");
+  });
+
+  it("marks subagent turns with sidechain indicator", () => {
+    const log = makeTurnLog({
+      turns: [
+        {
+          turnNumber: 1,
+          timestamp: "2026-03-30T14:00:00.000Z",
+          durationMs: 1000,
+          tokensIn: 100,
+          tokensOut: 50,
+          justification: "",
+          tools: [{ seq: 1, name: "Bash", input: { command: "ls" }, isError: false }],
+          isSidechain: true,
+          agentId: "sub-1",
+        },
+      ],
+      totalToolCalls: 1,
+      totalErrors: 0,
+    });
+    const content = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: null,
+      execLog: log,
+    });
+    expect(content).toContain("🔀");
+    expect(content).toContain("*Subagent: sub-1*");
+  });
+
+  it("includes title in heading", () => {
+    const content = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: makeTurnLog(),
+      execLog: null,
+    });
+    expect(content).toContain("# Tool Log: My Plan");
+  });
+
+  it("includes cc_version when provided", () => {
+    const content = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: makeTurnLog(),
+      execLog: null,
+      ccVersion: "1.0.30",
+    });
+    expect(content).toContain('cc_version: "1.0.30"');
+  });
+
+  it("includes model when provided", () => {
+    const content = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: makeTurnLog(),
+      execLog: null,
+      model: "claude-opus-4-6",
+    });
+    expect(content).toContain("model: claude-opus-4-6");
   });
 });

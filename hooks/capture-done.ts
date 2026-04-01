@@ -13,6 +13,7 @@ import {
   formatDuration,
   formatModelYaml,
   formatTagsYaml,
+  formatToolsLogContent,
   formatToolsNoteContent,
   getDateParts,
   getJournalPath,
@@ -29,6 +30,7 @@ import {
 } from "./shared.ts";
 import {
   collectExecutionStats,
+  collectToolLog,
   collectTranscriptStats,
   computeDurationMs,
   findExitPlanIndex,
@@ -234,7 +236,7 @@ ${fileList}
       process.exit(0);
     }
 
-    // Create plan-tools.md with combined stats from both phases
+    // Create tools-stats.md with combined stats from both phases
     const planStats = state.planStats ?? null;
     const toolsNoteContent = formatToolsNoteContent({
       planStats,
@@ -249,16 +251,47 @@ ${fileList}
     });
 
     if (toolsNoteContent) {
-      const toolsNotePath = `${state.plan_dir}/plan-tools`;
+      const toolsNotePath = `${state.plan_dir}/tools-stats`;
       const escapedToolsContent = toolsNoteContent.replace(/\n/g, "\\n");
       const toolsResult = runObsidian(
         ["create", `path=${toolsNotePath}`, `content=${escapedToolsContent}`, "silent"],
         config.vault,
       );
       if (toolsResult.exitCode !== 0) {
-        debugLog("Failed to create plan-tools note\n", DEBUG_LOG);
+        debugLog("Failed to create tools-stats note\n", DEBUG_LOG);
       } else {
-        debugLog(`Plan tools captured -> ${toolsNotePath}.md\n`, DEBUG_LOG);
+        debugLog(`Tools stats captured -> ${toolsNotePath}.md\n`, DEBUG_LOG);
+      }
+    }
+
+    // Create tools-log.md with chronological tool use log
+    const planLog = planStats ? collectToolLog(entries, 0, exitIdx) : null;
+    const execLog = transcriptStats ? collectToolLog(entries, exitIdx) : null;
+
+    const toolsLogContent = formatToolsLogContent({
+      planLog,
+      execLog,
+      planTitle: state.plan_title,
+      planDir: state.plan_dir,
+      journalPath,
+      datetime,
+      project,
+      contextCap,
+      ccVersion,
+      model: transcriptStats?.model ?? planStats?.model,
+    });
+
+    if (toolsLogContent) {
+      const toolsLogPath = `${state.plan_dir}/tools-log`;
+      const escapedLogContent = toolsLogContent.replace(/\n/g, "\\n");
+      const logResult = runObsidian(
+        ["create", `path=${toolsLogPath}`, `content=${escapedLogContent}`, "silent"],
+        config.vault,
+      );
+      if (logResult.exitCode !== 0) {
+        debugLog("Failed to create tools-log note\n", DEBUG_LOG);
+      } else {
+        debugLog(`Tools log captured -> ${toolsLogPath}.md\n`, DEBUG_LOG);
       }
     }
 
