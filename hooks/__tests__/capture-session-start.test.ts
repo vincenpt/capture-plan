@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { parseCcVersion, parseModelContextCap } from "../capture-session-start.ts";
+import { parseModelContextCap } from "../capture-session-start.ts";
+import { parseCcVersion } from "../shared.ts";
 
 describe("parseModelContextCap", () => {
   it("parses [1m] as 1M tokens", () => {

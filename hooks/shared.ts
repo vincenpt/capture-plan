@@ -32,6 +32,7 @@ export interface SessionState {
   project?: string;
   tags?: string;
   model?: string;
+  cc_version?: string;
   planStats?: TranscriptStats;
 }
 
@@ -466,6 +467,7 @@ function serializeStateToFrontmatter(state: SessionState): string {
   if (state.project) lines.push(`project: "${state.project}"`);
   if (state.tags) lines.push(`tags: "${state.tags}"`);
   if (state.model) lines.push(`model: "${state.model}"`);
+  if (state.cc_version) lines.push(`cc_version: "${state.cc_version}"`);
   if (state.planStats) {
     const json = JSON.stringify(state.planStats).replace(/"/g, '\\"');
     lines.push(`plan_stats_json: "${json}"`);
@@ -503,6 +505,7 @@ export function parseStateFromFrontmatter(content: string): SessionState | null 
     project: get("project"),
     tags: get("tags"),
     model: get("model"),
+    cc_version: get("cc_version"),
   };
 
   const statsJson = get("plan_stats_json");
@@ -667,6 +670,25 @@ export function readContextHint(sessionId: string): ContextHintResult {
 
 export function readCcVersion(sessionId: string): string | undefined {
   return readContextHint(sessionId).cc_version;
+}
+
+/** Parse Claude Code version from `claude --version` output (e.g. "2.1.89 (Claude Code)"). */
+export function parseCcVersion(raw: string): string | undefined {
+  const match = raw.trim().match(/^(\d+\.\d+\.\d+)/);
+  return match ? `v${match[1]}` : undefined;
+}
+
+export function detectCcVersion(): string | undefined {
+  try {
+    const result = Bun.spawnSync(["claude", "--version"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (result.exitCode !== 0) return undefined;
+    return parseCcVersion(result.stdout.toString());
+  } catch {
+    return undefined;
+  }
 }
 
 export function formatCcVersionYaml(ccVersion?: string): string {

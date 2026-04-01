@@ -5,7 +5,7 @@
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { debugLog, loadConfig } from "./shared.ts";
+import { debugLog, detectCcVersion, loadConfig } from "./shared.ts";
 
 const DEBUG_LOG = "/tmp/capture-plan-debug.log";
 
@@ -35,25 +35,6 @@ export function parseModelContextCap(model: string): number | undefined {
   if (unit === "m") return num * 1_000_000;
   if (unit === "k") return num * 1_000;
   return undefined;
-}
-
-/** Parse Claude Code version from `claude --version` output (e.g. "2.1.89 (Claude Code)"). */
-export function parseCcVersion(raw: string): string | undefined {
-  const match = raw.trim().match(/^(\d+\.\d+\.\d+)/);
-  return match ? `v${match[1]}` : undefined;
-}
-
-function detectCcVersion(): string | undefined {
-  try {
-    const result = Bun.spawnSync(["claude", "--version"], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    if (result.exitCode !== 0) return undefined;
-    return parseCcVersion(result.stdout.toString());
-  } catch {
-    return undefined;
-  }
 }
 
 export function contextHintPath(sessionId: string): string {

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   appendToJournal,
   debugLog,
+  detectCcVersion,
   extractTitle,
   findTranscriptPath,
   formatCcVersionYaml,
@@ -155,7 +156,8 @@ async function main(): Promise<void> {
       sessionId,
     );
     const modelYaml = formatModelYaml(stats, contextCap);
-    const ccVersionYaml = formatCcVersionYaml(readCcVersion(sessionId));
+    const ccVersion = detectCcVersion() ?? readCcVersion(sessionId);
+    const ccVersionYaml = formatCcVersionYaml(ccVersion);
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
@@ -192,6 +194,7 @@ ${stripTitleLine(planContent)}
       project,
       tags: newTags,
       model: stats?.model,
+      cc_version: ccVersion,
       planStats: stats ?? undefined,
     };
     const stateWritten = writeVaultState(state, config.vault);

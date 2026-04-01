@@ -203,7 +203,7 @@ async function main(): Promise<void> {
       sessionId,
     );
     const modelYaml = formatModelYaml(transcriptStats, contextCap);
-    const ccVersion = readCcVersion(sessionId);
+    const ccVersion = state.cc_version ?? readCcVersion(sessionId);
     const ccVersionYaml = formatCcVersionYaml(ccVersion);
 
     const noteContent = `---

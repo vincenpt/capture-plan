@@ -185,6 +185,21 @@ describe("parseStateFromFrontmatter", () => {
     expect(parsed?.planStats).toEqual(stats);
   });
 
+  it("round-trips cc_version through serialize/parse", () => {
+    const content = makeStateMd({
+      session_id: testState.session_id,
+      plan_slug: testState.plan_slug,
+      plan_title: testState.plan_title,
+      plan_dir: testState.plan_dir,
+      date_key: testState.date_key,
+      timestamp: testState.timestamp,
+      cc_version: "v2.1.89",
+    });
+    const parsed = shared.parseStateFromFrontmatter(content);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.cc_version).toBe("v2.1.89");
+  });
+
   it("handles plan titles with escaped quotes", () => {
     const content = makeStateMd({
       session_id: "abc-123",
