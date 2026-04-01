@@ -295,6 +295,28 @@ describe("appendToJournal", () => {
     expect(calls[2].cmd).toContain("append");
   });
 
+  it("creates file when CLI append reports error in stdout with exitCode 0", () => {
+    let callCount = 0;
+    spawnSyncSpy.mockImplementation(((cmd: string[], opts?: unknown) => {
+      calls.push({ cmd: [...cmd], opts });
+      callCount++;
+      // First call: append returns exitCode 0 but Error: in stdout (real CLI behavior)
+      if (callCount === 1) {
+        return spawnSyncResult({
+          stdout: 'Error: File "Journal/2026/04-April/01-Wednesday.md" not found.',
+          exitCode: 0,
+        });
+      }
+      return spawnSyncResult({});
+    }) as typeof Bun.spawnSync);
+
+    appendToJournal("content", "Journal/2026/04-April/01-Wednesday");
+    expect(calls.length).toBe(3);
+    expect(calls[0].cmd).toContain("append");
+    expect(calls[1].cmd).toContain("create");
+    expect(calls[2].cmd).toContain("append");
+  });
+
   it("appends .md extension if missing", () => {
     appendToJournal("content", "Journal/2026/03/29");
     const appendCall = calls[0];
