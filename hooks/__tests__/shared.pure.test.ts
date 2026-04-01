@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   computeContextPct,
   contextCapLabel,
+  escapeTableCell,
   extractTitle,
   formatAmPm,
   formatCcVersionYaml,
@@ -17,6 +18,8 @@ import {
   getDatePartsFor,
   getJournalPathForDate,
   getProjectName,
+  isCodeLike,
+  langFromPath,
   mergeTags,
   mergeTranscriptStats,
   padCounter,
@@ -968,71 +971,234 @@ describe("formatToolsNoteContent", () => {
   });
 });
 
+// ---- Tool Log Helpers ----
+
+describe("escapeTableCell", () => {
+  it("escapes pipe characters", () => {
+    expect(escapeTableCell("foo|bar|baz")).toBe("foo\\|bar\\|baz");
+  });
+
+  it("converts newlines to <br>", () => {
+    expect(escapeTableCell("line1\nline2")).toBe("line1<br>line2");
+  });
+
+  it("handles both pipes and newlines", () => {
+    expect(escapeTableCell("a|b\nc|d")).toBe("a\\|b<br>c\\|d");
+  });
+});
+
+describe("isCodeLike", () => {
+  it("detects absolute paths", () => {
+    expect(isCodeLike("file_path", "/src/foo.ts")).toBe(true);
+  });
+
+  it("detects relative paths", () => {
+    expect(isCodeLike("path", "./src")).toBe(true);
+    expect(isCodeLike("path", "../lib")).toBe(true);
+  });
+
+  it("detects home-relative paths", () => {
+    expect(isCodeLike("path", "~/Documents")).toBe(true);
+  });
+
+  it("detects glob patterns", () => {
+    expect(isCodeLike("pattern", "src/**/*.ts")).toBe(true);
+  });
+
+  it("detects file-extension-like values", () => {
+    expect(isCodeLike("glob", "*.tsx")).toBe(true);
+  });
+
+  it("detects known enum keys", () => {
+    expect(isCodeLike("subagent_type", "Explore")).toBe(true);
+    expect(isCodeLike("output_mode", "content")).toBe(true);
+  });
+
+  it("returns false for plain text", () => {
+    expect(isCodeLike("description", "Find all files")).toBe(false);
+  });
+});
+
+describe("langFromPath", () => {
+  it("maps .ts to typescript", () => {
+    expect(langFromPath("/src/foo.ts")).toBe("typescript");
+  });
+
+  it("maps .py to python", () => {
+    expect(langFromPath("script.py")).toBe("python");
+  });
+
+  it("maps .json to json", () => {
+    expect(langFromPath("config.json")).toBe("json");
+  });
+
+  it("returns empty string for unknown extensions", () => {
+    expect(langFromPath("file.xyz")).toBe("");
+  });
+
+  it("returns empty string for no extension", () => {
+    expect(langFromPath("Makefile")).toBe("");
+  });
+});
+
 // ---- formatToolArgs ----
 
 describe("formatToolArgs", () => {
-  it("formats simple string args as bullet lines", () => {
-    const result = formatToolArgs({ file_path: "/src/foo.ts" });
-    expect(result).toBe("- file_path: /src/foo.ts");
+  it("formats file_path as table with backticks", () => {
+    const { table, codeFence } = formatToolArgs("Read", { file_path: "/src/foo.ts" });
+    expect(table).toContain("| Read | |");
+    expect(table).toContain("| file_path | `/src/foo.ts` |");
+    expect(codeFence).toBe("");
   });
 
-  it("puts each arg on its own bullet line", () => {
-    const result = formatToolArgs({ pattern: "hello", path: "/src" });
-    expect(result).toBe("- pattern: hello\n- path: /src");
+  it("puts each arg on its own table row", () => {
+    const { table } = formatToolArgs("Grep", { pattern: "hello", path: "/src" });
+    expect(table).toContain("| pattern | hello |");
+    expect(table).toContain("| path | `/src` |");
   });
 
   it("truncates long string values", () => {
     const longVal = "a".repeat(150);
-    const result = formatToolArgs({ description: longVal });
-    expect(result).toContain("a".repeat(60));
-    expect(result).toContain("… [150 total]");
-  });
-
-  it("shows length only for known large-content keys", () => {
-    const result = formatToolArgs({ content: "x".repeat(50) });
-    expect(result).toBe("- content: [50 chars]");
+    const { table } = formatToolArgs("Agent", { description: longVal });
+    expect(table).toContain("a".repeat(60));
+    expect(table).toContain("… [150 total]");
   });
 
   it("shows length only for old_string and new_string", () => {
-    const result = formatToolArgs({
+    const { table } = formatToolArgs("Edit", {
       old_string: "original code here",
       new_string: "replacement code here",
     });
-    expect(result).toContain("- old_string: [18 chars]");
-    expect(result).toContain("- new_string: [21 chars]");
+    expect(table).toContain("| old_string | [18 chars] |");
+    expect(table).toContain("| new_string | [21 chars] |");
   });
 
-  it("handles boolean and number values", () => {
-    const result = formatToolArgs({ multiline: true, offset: 42 });
-    expect(result).toBe("- multiline: true\n- offset: 42");
+  it("handles boolean and number values with backticks", () => {
+    const { table } = formatToolArgs("Grep", { multiline: true, offset: 42 });
+    expect(table).toContain("| multiline | `true` |");
+    expect(table).toContain("| offset | `42` |");
   });
 
   it("handles object values with JSON stringification", () => {
-    const result = formatToolArgs({ options: { a: 1 } });
-    expect(result).toBe('- options: {"a":1}');
+    const { table } = formatToolArgs("SomeTool", { options: { a: 1 } });
+    expect(table).toContain('| options | {"a":1} |');
   });
 
   it("skips null and undefined values", () => {
-    const result = formatToolArgs({ file_path: "/src/foo.ts", extra: null, missing: undefined });
-    expect(result).toBe("- file_path: /src/foo.ts");
+    const { table } = formatToolArgs("Read", {
+      file_path: "/src/foo.ts",
+      extra: null,
+      missing: undefined,
+    });
+    expect(table).toContain("| file_path | `/src/foo.ts` |");
+    expect(table).not.toContain("extra");
+    expect(table).not.toContain("missing");
   });
 
-  it("returns empty string for empty input", () => {
-    expect(formatToolArgs({})).toBe("");
+  it("returns empty table and codeFence for empty input", () => {
+    const { table, codeFence } = formatToolArgs("Read", {});
+    expect(table).toBe("");
+    expect(codeFence).toBe("");
   });
 
-  it("renders command as sh code fence", () => {
-    const result = formatToolArgs({ command: "bun test 2>&1 | tail -30" });
-    expect(result).toBe("```sh\nbun test 2>&1 | tail -30\n```");
+  it("renders Bash command as separate code fence", () => {
+    const { table, codeFence } = formatToolArgs("Bash", {
+      command: "bun test 2>&1 | tail -30",
+    });
+    expect(table).toBe("");
+    expect(codeFence).toBe("```sh\nbun test 2>&1 | tail -30\n```");
   });
 
-  it("renders command code fence after other args", () => {
-    const result = formatToolArgs({
+  it("renders Bash args in table and command in code fence", () => {
+    const { table, codeFence } = formatToolArgs("Bash", {
       command: "ls -la",
       description: "List files",
       timeout: 30000,
     });
-    expect(result).toBe("- description: List files\n- timeout: 30000\n```sh\nls -la\n```");
+    expect(table).toContain("| description | List files |");
+    expect(table).toContain("| timeout | `30000` |");
+    expect(codeFence).toBe("```sh\nls -la\n```");
+  });
+
+  it("escapes pipe characters in table cells", () => {
+    const { table } = formatToolArgs("Grep", { pattern: "foo|bar" });
+    expect(table).toContain("| pattern | foo\\|bar |");
+  });
+
+  it("preserves full Agent prompt without truncation", () => {
+    const longPrompt = "Search for ".repeat(20); // 220 chars, over ARG_MAX_LEN
+    const { table } = formatToolArgs("Agent", { prompt: longPrompt });
+    expect(table).toContain(longPrompt.replace(/\|/g, "\\|"));
+    expect(table).not.toContain("… [");
+  });
+
+  it("renders Agent prompt newlines as <br>", () => {
+    const { table } = formatToolArgs("Agent", { prompt: "line one\nline two\nline three" });
+    expect(table).toContain("line one<br>line two<br>line three");
+  });
+
+  it("extracts only plan title for ExitPlanMode", () => {
+    const planContent = "# My Great Plan\n\nSome details here\n- step 1\n- step 2";
+    const { table } = formatToolArgs("ExitPlanMode", {
+      plan: planContent,
+      allowedPrompts: [{ tool: "Bash", prompt: "run tests" }],
+    });
+    expect(table).toContain("| plan | My Great Plan |");
+    expect(table).not.toContain("allowedPrompts");
+    expect(table).not.toContain("Some details");
+  });
+
+  it("renders Write content as 5-line head code fence", () => {
+    const content = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n");
+    const { table, codeFence } = formatToolArgs("Write", {
+      file_path: "/src/app.ts",
+      content,
+    });
+    expect(table).toContain("| file_path | `/src/app.ts` |");
+    expect(table).not.toContain("content");
+    expect(codeFence).toContain("```typescript");
+    expect(codeFence).toContain("line 1");
+    expect(codeFence).toContain("line 5");
+    expect(codeFence).not.toContain("line 6");
+    expect(codeFence).toContain("... [truncated, 20 lines total]");
+  });
+
+  it("renders Write content without truncation when ≤5 lines", () => {
+    const content = "line 1\nline 2\nline 3";
+    const { codeFence } = formatToolArgs("Write", {
+      file_path: "/src/app.ts",
+      content,
+    });
+    expect(codeFence).toContain("line 3");
+    expect(codeFence).not.toContain("truncated");
+  });
+
+  it("renders ctx_execute code in language-typed fence", () => {
+    const { table, codeFence } = formatToolArgs("mcp__ctx_execute", {
+      language: "python",
+      code: "print('hello')",
+    });
+    expect(codeFence).toBe("```python\nprint('hello')\n```");
+    expect(table).not.toContain("language");
+    expect(table).not.toContain("code");
+  });
+
+  it("backticks code-like values (paths, globs, enums)", () => {
+    const { table } = formatToolArgs("Glob", { pattern: "src/**/*.ts" });
+    expect(table).toContain("| pattern | `src/**/*.ts` |");
+  });
+
+  it("backticks subagent_type values", () => {
+    const { table } = formatToolArgs("Agent", {
+      subagent_type: "Explore",
+      description: "Find things",
+    });
+    expect(table).toContain("| subagent_type | `Explore` |");
+  });
+
+  it("detects file-extension-like values as code", () => {
+    const { table } = formatToolArgs("SomeTool", { glob: "*.tsx" });
+    expect(table).toContain("| glob | `*.tsx` |");
   });
 });
 
@@ -1117,14 +1283,19 @@ describe("formatToolsLogContent", () => {
     expect(content).toContain("> Checking the implementation");
   });
 
-  it("renders tool entries with sequential numbers and bulleted args", () => {
+  it("renders tool entries as bold name with table args", () => {
     const content = formatToolsLogContent({
       ...baseLogOpts,
       planLog: makeTurnLog(),
       execLog: null,
     });
-    expect(content).toContain("1. **Read**\n    - file_path: /src/foo.ts");
-    expect(content).toContain("2. **Grep** ❌\n    - pattern: hello");
+    expect(content).toContain("**Read**");
+    expect(content).toContain("| file_path | `/src/foo.ts` |");
+    expect(content).toContain("**Grep** ❌");
+    expect(content).toContain("| pattern | hello |");
+    // No numbered list
+    expect(content).not.toContain("1. **Read**");
+    expect(content).not.toContain("2. **Grep**");
   });
 
   it("renders both phases", () => {

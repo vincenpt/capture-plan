@@ -889,47 +889,153 @@ ${body}
 
 // ---- Tool Log Formatting ----
 
-const LARGE_CONTENT_KEYS = new Set(["content", "old_string", "new_string", "code"]);
+const LARGE_CONTENT_KEYS = new Set(["old_string", "new_string"]);
 const ARG_MAX_LEN = 100;
 const ARG_PREVIEW_LEN = 60;
 
-export function formatToolArgs(input: Record<string, unknown>): string {
-  const lines: string[] = [];
-  let commandFence = "";
+const CODE_LIKE_KEYS = new Set([
+  "subagent_type",
+  "language",
+  "output_mode",
+  "type",
+  "isolation",
+  "model",
+]);
+
+const EXT_TO_LANG: Record<string, string> = {
+  ".ts": "typescript",
+  ".tsx": "typescript",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
+  ".json": "json",
+  ".md": "markdown",
+  ".py": "python",
+  ".sh": "sh",
+  ".bash": "bash",
+  ".zsh": "zsh",
+  ".yml": "yaml",
+  ".yaml": "yaml",
+  ".toml": "toml",
+  ".css": "css",
+  ".html": "html",
+  ".sql": "sql",
+  ".rs": "rust",
+  ".go": "go",
+  ".rb": "ruby",
+  ".swift": "swift",
+};
+
+export function escapeTableCell(val: string): string {
+  return val.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+}
+
+export function isCodeLike(key: string, val: string): boolean {
+  if (CODE_LIKE_KEYS.has(key)) return true;
+  if (/^[~/.]/.test(val) || val.startsWith("..")) return true;
+  if (val.includes("*")) return true;
+  if (/\.\w{1,5}$/.test(val) && !val.includes(" ")) return true;
+  return false;
+}
+
+export function langFromPath(filePath: string): string {
+  const dot = filePath.lastIndexOf(".");
+  if (dot === -1) return "";
+  return EXT_TO_LANG[filePath.slice(dot)] ?? "";
+}
+
+export function formatToolArgs(
+  toolName: string,
+  input: Record<string, unknown>,
+): { table: string; codeFence: string } {
+  const rows: [string, string][] = [];
+  let codeFence = "";
+
+  // Resolve file_path for language detection (Write tool)
+  const filePath = typeof input.file_path === "string" ? input.file_path : "";
 
   for (const [key, val] of Object.entries(input)) {
     if (val === undefined || val === null) continue;
 
-    // Bash command → code fence, rendered last
+    // Bash command → code fence, outside table
     if (key === "command" && typeof val === "string") {
-      commandFence = `\`\`\`sh\n${val}\n\`\`\``;
+      codeFence = `\`\`\`sh\n${val}\n\`\`\``;
       continue;
+    }
+
+    // Write content → 5-line head in code fence
+    if (key === "content" && toolName === "Write" && typeof val === "string") {
+      const lines = val.split("\n");
+      const lang = langFromPath(filePath);
+      const head = lines.slice(0, 5).join("\n");
+      const suffix = lines.length > 5 ? `\n... [truncated, ${lines.length} lines total]` : "";
+      codeFence = `\`\`\`${lang}\n${head}${suffix}\n\`\`\``;
+      continue;
+    }
+
+    // ctx_execute code → code fence with language
+    if (
+      key === "code" &&
+      typeof val === "string" &&
+      (toolName.includes("ctx_execute") || toolName.includes("ctx_execute_file"))
+    ) {
+      const lang = typeof input.language === "string" ? input.language : "";
+      codeFence = `\`\`\`${lang}\n${val}\n\`\`\``;
+      continue;
+    }
+
+    // Skip language key for ctx_execute (already used in code fence)
+    if (
+      key === "language" &&
+      (toolName.includes("ctx_execute") || toolName.includes("ctx_execute_file"))
+    ) {
+      continue;
+    }
+
+    // ExitPlanMode plan → extract title only, skip allowedPrompts
+    if (toolName === "ExitPlanMode") {
+      if (key === "allowedPrompts") continue;
+      if (key === "plan" && typeof val === "string") {
+        rows.push([key, escapeTableCell(extractTitle(val))]);
+        continue;
+      }
     }
 
     let display: string;
     if (typeof val === "string") {
       if (LARGE_CONTENT_KEYS.has(key)) {
         display = `[${val.length} chars]`;
+      } else if (key === "prompt" && toolName === "Agent") {
+        // Agent prompts: full text, no truncation
+        display = escapeTableCell(val);
       } else if (val.length > ARG_MAX_LEN) {
-        display = `${val.slice(0, ARG_PREVIEW_LEN)}… [${val.length} total]`;
+        display = escapeTableCell(`${val.slice(0, ARG_PREVIEW_LEN)}… [${val.length} total]`);
       } else {
-        display = val;
+        const escaped = escapeTableCell(val);
+        display = isCodeLike(key, val) ? `\`${escaped}\`` : escaped;
       }
     } else if (typeof val === "boolean" || typeof val === "number") {
-      display = String(val);
+      display = `\`${val}\``;
     } else {
       const json = JSON.stringify(val);
       display =
         json.length > ARG_MAX_LEN
-          ? `${json.slice(0, ARG_PREVIEW_LEN)}… [${json.length} total]`
-          : json;
+          ? escapeTableCell(`${json.slice(0, ARG_PREVIEW_LEN)}… [${json.length} total]`)
+          : escapeTableCell(json);
     }
-    lines.push(`- ${key}: ${display}`);
+    rows.push([key, display]);
   }
 
-  if (commandFence) lines.push(commandFence);
+  let table = "";
+  if (rows.length > 0) {
+    const header = `| ${toolName} | |`;
+    const divider = "|---|---|";
+    const body = rows.map(([k, v]) => `| ${k} | ${v} |`).join("\n");
+    table = `${header}\n${divider}\n${body}`;
+  }
 
-  return lines.join("\n");
+  return { table, codeFence };
 }
 
 function formatTimestamp(isoTs: string): string {
@@ -1018,16 +1124,11 @@ export function formatToolsLogContent(opts: {
       }
 
       for (const tool of turn.tools) {
-        const args = formatToolArgs(tool.input);
+        const { table, codeFence } = formatToolArgs(tool.name, tool.input);
         const errorMark = tool.isError ? " ❌" : "";
-        sections.push(`${tool.seq}. **${tool.name}**${errorMark}`);
-        if (args) {
-          const indented = args
-            .split("\n")
-            .map((l) => `    ${l}`)
-            .join("\n");
-          sections.push(indented);
-        }
+        sections.push(`**${tool.name}**${errorMark}\n`);
+        if (table) sections.push(`${table}\n`);
+        if (codeFence) sections.push(`${codeFence}\n`);
       }
       sections.push("");
     }
