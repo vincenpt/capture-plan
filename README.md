@@ -132,6 +132,14 @@ Enables dev mode by symlinking the plugin cache to the local repo checkout. Hook
 
 Disables dev mode by removing the symlink and restoring the cached release copy.
 
+### `/test-e2e`
+
+Runs the full hook lifecycle end-to-end against the real Obsidian vault: SessionStart → capture-plan (ExitPlanMode) → capture-done (Stop) → journal. Uses synthetic payloads and transcript data. Validates 33 checks across all output files (plan, summary, tools-stats, tools-log, journal entries), writes a `test-log.md` results table to the vault, then cleans up all test artifacts.
+
+### `/test-e2e-skip-clean`
+
+Same as `/test-e2e` but preserves all generated vault artifacts for manual inspection in Obsidian. Useful for debugging or verifying note formatting.
+
 ## License
 
 MIT
