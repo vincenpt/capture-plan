@@ -12,7 +12,7 @@ A Claude Code plugin that captures plans and execution summaries to an Obsidian 
 ## Commands
 
 ```bash
-bun test                              # Run all tests (385 tests across 7 files)
+bun test                              # Run all tests (396 tests across 13 files)
 bun test capture-done.test.ts         # Run a single test file
 bun test --grep "pattern"             # Run tests matching a pattern
 bun test --watch                      # Watch mode
@@ -52,11 +52,22 @@ Config is loaded via Bun's built-in TOML `import()`.
 
 ### Test Organization
 
-Tests in `hooks/__tests__/` are split by I/O boundary:
-- `shared.pure.test.ts` — pure functions, no I/O
+Tests in `hooks/__tests__/` are split by functional suite:
+- `text.test.ts` — string processing, slugs, tags (pure)
+- `dates.test.ts` — date/time formatting (pure)
+- `formatting-stats.test.ts` — stats YAML, context caps, plan frontmatter (pure)
+- `tools-note.test.ts` — tools summary note rendering (pure)
+- `tools-log.test.ts` — tools log rendering, agent files (pure)
+- `transcript-parsing.test.ts` — transcript reading, plan boundary detection
+- `transcript-extraction.test.ts` — extracting text, files, stats from transcripts
+- `transcript-stats-unit.test.ts` — individual stat-collection functions
+- `transcript-stats-integration.test.ts` — composed stats, tool usage, tool log
 - `shared.filesystem.test.ts` — filesystem ops with temp directories
 - `shared.external.test.ts` — mocked Obsidian CLI and Claude API calls
-- `capture-done.test.ts` — integration tests for the Stop hook
+- `backport-journal.test.ts` — plan backporting workflow
+- `capture-session-start.test.ts` — session initialization
+
+Shared test factories live in `helpers/transcript-helpers.ts`.
 
 ### Session State
 
