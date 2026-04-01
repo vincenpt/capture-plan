@@ -193,7 +193,11 @@ async function main(): Promise<void> {
         ? stats.filesChanged.map((f) => `- \`${f}\``).join("\n")
         : "_No file changes recorded_";
 
-    const contextCap = resolveContextCap(transcriptStats?.peakTurnContext ?? 0, config.context_cap);
+    const contextCap = resolveContextCap(
+      transcriptStats?.peakTurnContext ?? 0,
+      config.context_cap,
+      sessionId,
+    );
     const modelYaml = formatModelYaml(transcriptStats, contextCap);
 
     const noteContent = `---

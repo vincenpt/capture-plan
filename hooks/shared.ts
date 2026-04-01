@@ -2,7 +2,7 @@
 // shared.ts — Shared utilities for capture-plan and capture-done hooks
 
 import { appendFileSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { McpServerInfo, TokenUsage, ToolUseRecord, TranscriptStats } from "./transcript.ts";
 
@@ -636,8 +636,29 @@ export function contextCapLabel(cap: number): string {
   return `${Math.round(cap / 1_000)}K`;
 }
 
-export function resolveContextCap(peakContext: number, configCap?: number): number {
+export function readContextHint(sessionId: string): number | undefined {
+  try {
+    const hintFile = join(tmpdir(), `capture-plan-context-${sessionId}.json`);
+    const raw = readFileSync(hintFile, "utf8");
+    const hint = JSON.parse(raw) as { context_cap?: number };
+    return typeof hint.context_cap === "number" && hint.context_cap > 0
+      ? hint.context_cap
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveContextCap(
+  peakContext: number,
+  configCap?: number,
+  sessionId?: string,
+): number {
   if (configCap && configCap > 0) return configCap;
+  if (sessionId) {
+    const hintCap = readContextHint(sessionId);
+    if (hintCap) return hintCap;
+  }
   if (peakContext > DEFAULT_CONTEXT_CAP) return 1_000_000;
   return DEFAULT_CONTEXT_CAP;
 }

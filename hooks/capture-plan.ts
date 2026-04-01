@@ -147,7 +147,11 @@ async function main(): Promise<void> {
     const project = getProjectName(payload.cwd);
     const tagsYaml = formatTagsYaml(newTags);
 
-    const contextCap = resolveContextCap(stats?.peakTurnContext ?? 0, config.context_cap);
+    const contextCap = resolveContextCap(
+      stats?.peakTurnContext ?? 0,
+      config.context_cap,
+      sessionId,
+    );
     const modelYaml = formatModelYaml(stats, contextCap);
 
     const noteContent = `---
