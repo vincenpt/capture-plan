@@ -8,6 +8,7 @@ import { join } from "node:path";
 import {
   appendToJournal,
   type Config,
+  createVaultNote,
   extractTitle,
   formatTagsYaml,
   getDatePartsFor,
@@ -20,7 +21,6 @@ import {
   nextCounter,
   padCounter,
   parsePlanFrontmatter,
-  runObsidian,
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
@@ -325,11 +325,7 @@ ${stripTitleLine(content)}
       const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${plan.ampmTime || "Plan"}]] | ${summary} |`;
 
       if (!options.dryRun) {
-        const escapedContent = noteContent.replace(/\n/g, "\\n");
-        runObsidian(
-          ["create", `path=${planPath}`, `content=${escapedContent}`, "silent"],
-          config.vault,
-        );
+        createVaultNote(planPath, noteContent, config.vault);
         appendToJournal(journalEntry, journalPath, config.vault);
         mergeTagsOnDailyNote(tags, journalPath, config.vault);
       }

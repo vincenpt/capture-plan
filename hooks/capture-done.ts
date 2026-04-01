@@ -6,6 +6,7 @@ import { basename, join } from "node:path";
 import {
   appendRowToJournalSection,
   appendToJournal,
+  createVaultNote,
   debugLog,
   deleteVaultState,
   findTranscriptPath,
@@ -24,7 +25,6 @@ import {
   mergeTagsOnDailyNote,
   readCcVersion,
   resolveContextCap,
-  runObsidian,
   scanForVaultState,
   summarizeWithClaude,
 } from "./shared.ts";
@@ -225,12 +225,8 @@ ${fileList}
 *Duration: ${duration}*
 `;
 
-    const escapedContent = noteContent.replace(/\n/g, "\\n");
-    const createResult = runObsidian(
-      ["create", `path=${summaryPath}`, `content=${escapedContent}`, "silent"],
-      config.vault,
-    );
-    if (createResult.exitCode !== 0) {
+    const createResult = createVaultNote(summaryPath, noteContent, config.vault);
+    if (!createResult.success) {
       debugLog("Failed to create summary note\n", DEBUG_LOG);
       if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
       process.exit(0);
@@ -252,12 +248,8 @@ ${fileList}
 
     if (toolsNoteContent) {
       const toolsNotePath = `${state.plan_dir}/tools-stats`;
-      const escapedToolsContent = toolsNoteContent.replace(/\n/g, "\\n");
-      const toolsResult = runObsidian(
-        ["create", `path=${toolsNotePath}`, `content=${escapedToolsContent}`, "silent"],
-        config.vault,
-      );
-      if (toolsResult.exitCode !== 0) {
+      const toolsResult = createVaultNote(toolsNotePath, toolsNoteContent, config.vault);
+      if (!toolsResult.success) {
         debugLog("Failed to create tools-stats note\n", DEBUG_LOG);
       } else {
         debugLog(`Tools stats captured -> ${toolsNotePath}.md\n`, DEBUG_LOG);
@@ -284,12 +276,8 @@ ${fileList}
     if (toolsLogResult) {
       // Create agent prompt files
       for (const agentFile of toolsLogResult.agentFiles) {
-        const escapedContent = agentFile.content.replace(/\n/g, "\\n");
-        const result = runObsidian(
-          ["create", `path=${agentFile.path}`, `content=${escapedContent}`, "silent"],
-          config.vault,
-        );
-        if (result.exitCode !== 0) {
+        const result = createVaultNote(agentFile.path, agentFile.content, config.vault);
+        if (!result.success) {
           debugLog(`Failed to create agent file: ${agentFile.path}\n`, DEBUG_LOG);
         } else {
           debugLog(`Agent prompt captured -> ${agentFile.path}.md\n`, DEBUG_LOG);
@@ -298,12 +286,8 @@ ${fileList}
 
       // Create tools-log.md
       const toolsLogPath = `${state.plan_dir}/tools-log`;
-      const escapedLogContent = toolsLogResult.markdown.replace(/\n/g, "\\n");
-      const logResult = runObsidian(
-        ["create", `path=${toolsLogPath}`, `content=${escapedLogContent}`, "silent"],
-        config.vault,
-      );
-      if (logResult.exitCode !== 0) {
+      const logResult = createVaultNote(toolsLogPath, toolsLogResult.markdown, config.vault);
+      if (!logResult.success) {
         debugLog("Failed to create tools-log note\n", DEBUG_LOG);
       } else {
         debugLog(`Tools log captured -> ${toolsLogPath}.md\n`, DEBUG_LOG);

@@ -16,13 +16,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { contextHintPath } from "./capture-session-start.ts";
 import {
+  createVaultNote,
   getDateParts,
   getJournalPath,
   getVaultPath,
   loadConfig,
   nextCounter,
   padCounter,
-  runObsidian,
   shortSessionId,
   toSlug,
 } from "./shared.ts";
@@ -411,12 +411,7 @@ ${rows.join("\n")}
 **Result: ${passed}/${total} passed${allPass ? "" : `, ${total - passed} failed`}**
 `;
 
-  const escaped = content.replace(/\n/g, "\\n");
-  const r = runObsidian(
-    ["create", `path=${planDir}/test-log`, `content=${escaped}`, "silent"],
-    vault,
-  );
-  return r.exitCode === 0;
+  return createVaultNote(`${planDir}/test-log`, content, vault).success;
 }
 
 // ---- Main ----

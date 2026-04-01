@@ -5,6 +5,7 @@
 import { join } from "node:path";
 import {
   appendToJournal,
+  createVaultNote,
   debugLog,
   detectCcVersion,
   extractTitle,
@@ -22,7 +23,6 @@ import {
   padCounter,
   readCcVersion,
   resolveContextCap,
-  runObsidian,
   type SessionState,
   shortSessionId,
   stripTitleLine,
@@ -169,12 +169,8 @@ ${stripTitleLine(planContent)}
 `;
 
     const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${ampmTime}]] | ${summary} |`;
-    const escapedContent = noteContent.replace(/\n/g, "\\n");
-    const createResult = runObsidian(
-      ["create", `path=${planPath}`, `content=${escapedContent}`, "silent"],
-      config.vault,
-    );
-    if (createResult.exitCode !== 0) {
+    const createResult = createVaultNote(planPath, noteContent, config.vault);
+    if (!createResult.success) {
       debugLog("Failed to create plan note\n", DEBUG_LOG);
       process.exit(0);
     }

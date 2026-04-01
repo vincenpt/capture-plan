@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import {
   appendToJournal,
+  createVaultNote,
   getVaultPath,
   mergeTagsOnDailyNote,
   runObsidian,
@@ -97,6 +98,43 @@ describe("runObsidian", () => {
 
     const result = runObsidian(["test"]);
     expect(result).toEqual({ stdout: "", exitCode: 1 });
+  });
+});
+
+// ---- createVaultNote ----
+
+describe("createVaultNote", () => {
+  let spawnSyncSpy: ReturnType<typeof spyOn>;
+
+  afterEach(() => {
+    spawnSyncSpy?.mockRestore();
+  });
+
+  it("escapes newlines and calls runObsidian create with silent", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({ stdout: "ok" }));
+
+    const result = createVaultNote("path/to/note", "line1\nline2\nline3", "MyVault");
+    expect(result).toEqual({ success: true, exitCode: 0 });
+    expect(spawnSyncSpy).toHaveBeenCalledWith(
+      [
+        "obsidian",
+        "vault=MyVault",
+        "create",
+        "path=path/to/note",
+        "content=line1\\nline2\\nline3",
+        "silent",
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+  });
+
+  it("returns success false on failure", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: "Error: vault not found", exitCode: 0 }),
+    );
+
+    const result = createVaultNote("path/to/note", "content");
+    expect(result).toEqual({ success: false, exitCode: 1 });
   });
 });
 

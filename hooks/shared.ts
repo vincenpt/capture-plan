@@ -113,6 +113,16 @@ export function runObsidian(args: string[], vault?: string): { stdout: string; e
   }
 }
 
+export function createVaultNote(
+  path: string,
+  content: string,
+  vault?: string,
+): { success: boolean; exitCode: number } {
+  const escaped = content.replace(/\n/g, "\\n");
+  const result = runObsidian(["create", `path=${path}`, `content=${escaped}`, "silent"], vault);
+  return { success: result.exitCode === 0, exitCode: result.exitCode };
+}
+
 // ---- Slug & Title ----
 
 export function extractTitle(content: string): string {
@@ -522,12 +532,7 @@ export function parseStateFromFrontmatter(content: string): SessionState | null 
 
 export function writeVaultState(state: SessionState, vault?: string): boolean {
   const content = serializeStateToFrontmatter(state);
-  const escaped = content.replace(/\n/g, "\\n");
-  const result = runObsidian(
-    ["create", `path=${state.plan_dir}/state`, `content=${escaped}`, "silent"],
-    vault,
-  );
-  return result.exitCode === 0;
+  return createVaultNote(`${state.plan_dir}/state`, content, vault).success;
 }
 
 export function scanForVaultState(sessionId: string, config: Config): SessionState | null {
