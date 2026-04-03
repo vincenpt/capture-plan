@@ -597,8 +597,12 @@ ${fileList}
           DEBUG_LOG,
         );
 
+        const skillCounts = new Map<string, number>();
         for (const inv of skillInvocations) {
-          const skillNotePath = `${state.plan_dir}/${inv.skill}`;
+          const count = skillCounts.get(inv.skill) ?? 0;
+          skillCounts.set(inv.skill, count + 1);
+          const suffix = count > 0 ? `-${count + 1}` : "";
+          const skillNotePath = `${state.plan_dir}/${inv.skill}${suffix}`;
           const contextText = [inv.contextBefore, inv.contextAfter].filter(Boolean).join("\n\n");
           const skillNoteContent = `---
 created: "[[${journalPath}|${datetime}]]"

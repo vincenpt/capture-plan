@@ -12,7 +12,7 @@ A Claude Code plugin that captures plans and execution summaries to an Obsidian 
 ## Commands
 
 ```bash
-bun test                              # Run all tests (396 tests across 13 files)
+bun test                              # Run all tests (422 tests across 14 files)
 bun test capture-done.test.ts         # Run a single test file
 bun test --grep "pattern"             # Run tests matching a pattern
 bun test --watch                      # Watch mode
@@ -66,6 +66,7 @@ Tests in `hooks/__tests__/` are split by functional suite:
 - `shared.external.test.ts` — mocked Obsidian CLI and Claude API calls
 - `backport-journal.test.ts` — plan backporting workflow
 - `capture-session-start.test.ts` — session initialization
+- `skill-detection.test.ts` — skill invocation detection, pre-check patterns, mixed sessions
 
 Shared test factories live in `helpers/transcript-helpers.ts`.
 
