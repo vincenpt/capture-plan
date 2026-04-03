@@ -260,6 +260,36 @@ describe("scanForVaultState", () => {
   });
 });
 
+describe("writeVaultState + parseStateFromFrontmatter skill round-trip", () => {
+  it("round-trips skill_name through frontmatter", () => {
+    const planDir = "Claude/Plans/2026/04-03/001-simplify-hooks";
+    const stateDir = join(tempDir, planDir);
+    mkdirSync(stateDir, { recursive: true });
+
+    // Write state.md manually (writeVaultState uses Obsidian CLI, not suitable for filesystem tests)
+    const content = [
+      "---",
+      'session_id: "test-skill-session"',
+      'plan_slug: "simplify-hooks"',
+      'plan_title: "Simplify Hooks Code"',
+      `plan_dir: "${planDir}"`,
+      'date_key: "2026-04-03"',
+      `timestamp: "${new Date().toISOString()}"`,
+      'source: "skill"',
+      'skill_name: "simplify"',
+      "---",
+    ].join("\n");
+    writeFileSync(join(stateDir, "state.md"), content, "utf8");
+
+    const stateFile = join(tempDir, planDir, "state.md");
+    const fileContent = readFileSync(stateFile, "utf8");
+    const parsed = shared.parseStateFromFrontmatter(fileContent);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.source).toBe("skill");
+    expect(parsed?.skill_name).toBe("simplify");
+  });
+});
+
 describe("deleteVaultState", () => {
   it("removes the state file", () => {
     const stateDir = join(tempDir, "Claude/Plans/2026/03-29/001-test");

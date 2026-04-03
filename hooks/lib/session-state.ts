@@ -24,6 +24,7 @@ function serializeStateToFrontmatter(state: SessionState): string {
   if (state.cc_version) lines.push(`cc_version: "${state.cc_version}"`);
   if (state.source) lines.push(`source: "${state.source}"`);
   if (state.spec_path) lines.push(`spec_path: "${state.spec_path}"`);
+  if (state.skill_name) lines.push(`skill_name: "${state.skill_name}"`);
   if (state.planStats) {
     const json = JSON.stringify(state.planStats).replace(/"/g, '\\"');
     lines.push(`plan_stats_json: "${json}"`);
@@ -65,6 +66,7 @@ export function parseStateFromFrontmatter(content: string): SessionState | null 
     cc_version: get("cc_version"),
     source: get("source") as SessionState["source"],
     spec_path: get("spec_path"),
+    skill_name: get("skill_name"),
   };
 
   const statsJson = get("plan_stats_json");
