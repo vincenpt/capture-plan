@@ -48,6 +48,35 @@ export function writeEntry(
   };
 }
 
+/** Factory for an assistant entry containing a Skill tool_use. */
+export function skillEntry(
+  skill: string,
+  args?: string,
+  overrides: Partial<TranscriptEntry> & { textBefore?: string } = {},
+): TranscriptEntry {
+  const { textBefore, ...rest } = overrides;
+  const content: ContentBlock[] = [];
+  if (textBefore) {
+    content.push({ type: "text", text: textBefore });
+  }
+  content.push({
+    type: "tool_use",
+    name: "Skill",
+    id: `skill-${skill}`,
+    input: { skill, ...(args ? { args } : {}) },
+  });
+  return {
+    type: "assistant",
+    timestamp: "2026-03-30T14:00:00.000Z",
+    message: {
+      role: "assistant",
+      content,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    },
+    ...rest,
+  };
+}
+
 /** Factory for building human transcript entries in tests. */
 export function humanEntry(
   overrides: Partial<TranscriptEntry> & {
