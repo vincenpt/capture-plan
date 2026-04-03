@@ -265,14 +265,14 @@ async function buildSkillState(
   // Build skills table
   const skillsTable = invocations
     .map((inv) => {
-      const time =
-        inv.index < entries.length && entries[inv.index].timestamp
-          ? new Date(entries[inv.index].timestamp as string).toLocaleTimeString("en-US", {
-              hour: "numeric",
-              minute: "2-digit",
-              hour12: true,
-            })
-          : "—";
+      const ts = entries[inv.index]?.timestamp;
+      const time = ts
+        ? new Date(ts).toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          })
+        : "—";
       return `| ${time} | ${inv.skill} | ${inv.args ?? "—"} |`;
     })
     .join("\n");
