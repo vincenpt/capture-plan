@@ -1,4 +1,4 @@
-import type { TranscriptEntry } from "../../transcript.ts";
+import type { ContentBlock, TranscriptEntry } from "../../transcript.ts";
 
 /** Factory for building assistant transcript entries in tests. */
 export function assistantEntry(
@@ -20,6 +20,59 @@ export function assistantEntry(
     type: "assistant",
     timestamp: "2026-03-30T14:00:00.000Z",
     message,
+    ...rest,
+  };
+}
+
+/** Factory for an assistant entry containing a Write tool_use. */
+export function writeEntry(
+  filePath: string,
+  content = "# Test Content\n\nBody text.",
+  overrides: Partial<TranscriptEntry> = {},
+): TranscriptEntry {
+  const block: ContentBlock = {
+    type: "tool_use",
+    name: "Write",
+    id: `write-${filePath.split("/").pop()}`,
+    input: { file_path: filePath, content },
+  };
+  return {
+    type: "assistant",
+    timestamp: "2026-03-30T14:00:00.000Z",
+    message: {
+      role: "assistant",
+      content: [block],
+      usage: { input_tokens: 100, output_tokens: 50 },
+    },
+    ...overrides,
+  };
+}
+
+/** Factory for an assistant entry containing a Skill tool_use. */
+export function skillEntry(
+  skill: string,
+  args?: string,
+  overrides: Partial<TranscriptEntry> & { textBefore?: string } = {},
+): TranscriptEntry {
+  const { textBefore, ...rest } = overrides;
+  const content: ContentBlock[] = [];
+  if (textBefore) {
+    content.push({ type: "text", text: textBefore });
+  }
+  content.push({
+    type: "tool_use",
+    name: "Skill",
+    id: `skill-${skill}`,
+    input: { skill, ...(args ? { args } : {}) },
+  });
+  return {
+    type: "assistant",
+    timestamp: "2026-03-30T14:00:00.000Z",
+    message: {
+      role: "assistant",
+      content,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    },
     ...rest,
   };
 }

@@ -3,6 +3,7 @@
 // Captures plans and persists them to Obsidian vault
 
 import { join } from "node:path";
+import { PLAN_SYSTEM_PROMPT } from "./lib/prompts.ts";
 import {
   appendToJournal,
   createVaultNote,
@@ -32,20 +33,18 @@ import {
 } from "./shared.ts";
 import {
   collectTranscriptStats,
+  extractPlanText,
   findExitPlanIndex,
   parseTranscript,
+  type TranscriptEntry,
   type TranscriptStats,
 } from "./transcript.ts";
 
 const DEBUG_LOG = "/tmp/capture-plan-debug.log";
 
-const PLAN_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given an engineering plan, output exactly two lines:
-Line 1: A 1-2 sentence summary (max 200 chars). Be specific about what will be built or changed.
-Line 2: 1-2 lowercase kebab-case tags relevant to the plan topic (comma-separated, no # prefix).
-Output ONLY these two lines.`;
-
 interface HookPayload {
   session_id: string;
+  transcript_path?: string;
   hook_event_name: string;
   tool_name: string;
   cwd?: string;
@@ -99,9 +98,31 @@ async function main(): Promise<void> {
     const hookEvent = payload.hook_event_name || "";
     const sessionId = payload.session_id || "unknown";
 
-    const extraction = await extractPlanContent(payload);
+    let extraction = await extractPlanContent(payload);
+
+    // Transcript fallback: parse once, reuse for both plan extraction and stats
+    let entries: TranscriptEntry[] | null = null;
+    let exitIdx = -1;
+    const transcriptPath = payload.transcript_path || findTranscriptPath(sessionId, payload.cwd);
+
+    if ((!extraction || extraction.content.length < 20) && transcriptPath) {
+      try {
+        entries = parseTranscript(transcriptPath);
+        exitIdx = findExitPlanIndex(entries);
+        if (exitIdx >= 0) {
+          const planText = extractPlanText(entries, exitIdx);
+          if (planText.length >= 20) {
+            extraction = { content: planText, source: "transcript", file: "" };
+            debugLog(`Plan extracted from transcript (${planText.length} chars)\n`, DEBUG_LOG);
+          }
+        }
+      } catch (err) {
+        debugLog(`Transcript fallback failed: ${err}\n`, DEBUG_LOG);
+      }
+    }
+
     if (!extraction || extraction.content.length < 20) {
-      debugLog(`No valid plan content\n`, DEBUG_LOG);
+      debugLog("No valid plan content\n", DEBUG_LOG);
       process.exit(0);
     }
 
@@ -118,20 +139,19 @@ async function main(): Promise<void> {
       DEBUG_LOG,
     );
 
-    // Collect planning-phase stats from transcript
+    // Collect planning-phase stats from transcript (reuse parsed entries if available)
     let stats: TranscriptStats | null = null;
     try {
-      const transcriptPath = findTranscriptPath(sessionId, payload.cwd);
-      if (transcriptPath) {
-        const entries = parseTranscript(transcriptPath);
-        const exitIdx = findExitPlanIndex(entries);
-        if (exitIdx >= 0) {
-          stats = collectTranscriptStats(entries, 0, exitIdx);
-          debugLog(
-            `Transcript stats collected: ${stats.totalToolCalls} tool calls, model=${stats.model}\n`,
-            DEBUG_LOG,
-          );
-        }
+      if (!entries && transcriptPath) {
+        entries = parseTranscript(transcriptPath);
+        exitIdx = findExitPlanIndex(entries);
+      }
+      if (entries && exitIdx >= 0) {
+        stats = collectTranscriptStats(entries, 0, exitIdx);
+        debugLog(
+          `Transcript stats collected: ${stats.totalToolCalls} tool calls, model=${stats.model}\n`,
+          DEBUG_LOG,
+        );
       }
     } catch (err) {
       debugLog(`Failed to collect transcript stats: ${err}\n`, DEBUG_LOG);
@@ -192,6 +212,7 @@ ${stripTitleLine(planContent)}
       model: stats?.model,
       cc_version: ccVersion,
       planStats: stats ?? undefined,
+      source: "plan-mode",
     };
     const stateWritten = writeVaultState(state, config.vault);
     if (!stateWritten) {

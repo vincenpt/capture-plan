@@ -7,3 +7,4 @@ node_modules/
 .claude/plans/
 .claude/image-cache/
 /.orphaned_at
+/.obsidian

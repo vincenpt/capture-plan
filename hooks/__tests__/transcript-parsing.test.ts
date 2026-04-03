@@ -4,12 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   EXECUTION_TOOLS,
+  extractPlanText,
   findExitPlanIndex,
+  findSuperpowersBoundary,
+  findSuperpowersWrites,
   getContentBlocks,
   hasExecutionAfter,
   parseTranscript,
   type TranscriptEntry,
 } from "../transcript.ts";
+import { assistantEntry, humanEntry, writeEntry } from "./helpers/transcript-helpers.ts";
 
 describe("getContentBlocks", () => {
   it("returns content array for assistant entry", () => {
@@ -246,5 +250,233 @@ describe("hasExecutionAfter", () => {
       makeToolEntry("Read"), // after index, but not execution
     ];
     expect(hasExecutionAfter(entries, 1)).toBe(false);
+  });
+});
+
+describe("findSuperpowersWrites", () => {
+  it("detects spec writes", () => {
+    const entries = [
+      assistantEntry(),
+      writeEntry(
+        "/project/docs/superpowers/specs/2026-04-03-auth-design.md",
+        "# Auth Design\n\nSpec body.",
+      ),
+      assistantEntry(),
+    ];
+    const writes = findSuperpowersWrites(entries);
+    expect(writes).toHaveLength(1);
+    expect(writes[0].type).toBe("spec");
+    expect(writes[0].index).toBe(1);
+    expect(writes[0].title).toBe("Auth Design");
+    expect(writes[0].filePath).toContain("superpowers/specs/");
+  });
+
+  it("detects plan writes", () => {
+    const entries = [
+      writeEntry(
+        "/project/docs/superpowers/plans/2026-04-03-auth.md",
+        "# Auth Implementation Plan\n\nTasks.",
+      ),
+    ];
+    const writes = findSuperpowersWrites(entries);
+    expect(writes).toHaveLength(1);
+    expect(writes[0].type).toBe("plan");
+    expect(writes[0].title).toBe("Auth Implementation Plan");
+  });
+
+  it("detects both spec and plan in same session", () => {
+    const entries = [
+      writeEntry(
+        "/project/docs/superpowers/specs/2026-04-03-auth-design.md",
+        "# Auth Design\n\nSpec.",
+      ),
+      humanEntry(),
+      writeEntry("/project/docs/superpowers/plans/2026-04-03-auth.md", "# Auth Plan\n\nPlan."),
+    ];
+    const writes = findSuperpowersWrites(entries);
+    expect(writes).toHaveLength(2);
+    expect(writes[0].type).toBe("spec");
+    expect(writes[1].type).toBe("plan");
+  });
+
+  it("ignores non-superpowers Write calls", () => {
+    const entries = [
+      writeEntry("/project/src/index.ts", "console.log('hello');"),
+      writeEntry("/project/README.md", "# Readme"),
+    ];
+    const writes = findSuperpowersWrites(entries);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("returns empty for entries with no Write tools", () => {
+    const entries = [
+      assistantEntry({ tools: [{ name: "Edit" }] }),
+      assistantEntry({ tools: [{ name: "Bash" }] }),
+    ];
+    expect(findSuperpowersWrites(entries)).toHaveLength(0);
+  });
+
+  it("returns empty for empty entries", () => {
+    expect(findSuperpowersWrites([])).toHaveLength(0);
+  });
+
+  it("uses custom patterns when provided", () => {
+    const entries = [writeEntry("/project/design/specs/auth.md", "# Auth\n\nDesign.")];
+    expect(findSuperpowersWrites(entries)).toHaveLength(0);
+    expect(findSuperpowersWrites(entries, "/design/specs/")).toHaveLength(1);
+    expect(findSuperpowersWrites(entries, "/design/specs/")[0].type).toBe("spec");
+  });
+
+  it("falls back to filename for title when no heading", () => {
+    const entries = [
+      writeEntry(
+        "/project/docs/superpowers/specs/2026-04-03-auth-design.md",
+        "No heading here, just body text.",
+      ),
+    ];
+    const writes = findSuperpowersWrites(entries);
+    expect(writes[0].title).toBe("auth-design");
+  });
+
+  it("ignores non-assistant entries", () => {
+    const entry = humanEntry();
+    // Force a Write-like content on a human entry (shouldn't happen, but defensive)
+    entry.message = {
+      role: "user",
+      content: [
+        {
+          type: "tool_use",
+          name: "Write",
+          input: { file_path: "/docs/superpowers/specs/x.md", content: "# X" },
+        },
+      ],
+    };
+    expect(findSuperpowersWrites([entry])).toHaveLength(0);
+  });
+});
+
+describe("findSuperpowersBoundary", () => {
+  it("returns plan index when both spec and plan exist", () => {
+    const entries = [
+      writeEntry("/project/docs/superpowers/specs/spec.md", "# Spec"),
+      humanEntry(),
+      writeEntry("/project/docs/superpowers/plans/plan.md", "# Plan"),
+      assistantEntry({ tools: [{ name: "Edit" }] }),
+    ];
+    const writes = findSuperpowersWrites(entries);
+    expect(findSuperpowersBoundary(writes)).toBe(2);
+  });
+
+  it("returns spec index when only spec exists", () => {
+    const entries = [
+      writeEntry("/project/docs/superpowers/specs/spec.md", "# Spec"),
+      assistantEntry({ tools: [{ name: "Bash" }] }),
+    ];
+    const writes = findSuperpowersWrites(entries);
+    expect(findSuperpowersBoundary(writes)).toBe(0);
+  });
+
+  it("returns last plan index when multiple plans exist", () => {
+    const entries = [
+      writeEntry("/project/docs/superpowers/plans/v1.md", "# V1"),
+      humanEntry(),
+      writeEntry("/project/docs/superpowers/plans/v2.md", "# V2"),
+    ];
+    const writes = findSuperpowersWrites(entries);
+    expect(findSuperpowersBoundary(writes)).toBe(2);
+  });
+
+  it("returns -1 for empty writes", () => {
+    expect(findSuperpowersBoundary([])).toBe(-1);
+  });
+});
+
+describe("extractPlanText", () => {
+  it("collects last 3 assistant text messages before exitIdx", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Analysis of the bug" }] },
+      }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Here is what I found" }] },
+      }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Proposed fix approach" }] },
+      }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Final plan summary" }] },
+      }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }), // exitIdx = 4
+    ];
+    // Should get last 3 before exitIdx (indices 1, 2, 3)
+    expect(extractPlanText(entries, 4)).toBe(
+      "Here is what I found\n\nProposed fix approach\n\nFinal plan summary",
+    );
+  });
+
+  it("returns empty string when no text before exitIdx", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({ tools: [{ name: "Read" }] }),
+      assistantEntry({ tools: [{ name: "Grep" }] }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }),
+    ];
+    expect(extractPlanText(entries, 2)).toBe("");
+  });
+
+  it("skips tool_use-only entries", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Plan content" }] },
+      }),
+      assistantEntry({ tools: [{ name: "Read" }] }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "More analysis" }] },
+      }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }),
+    ];
+    expect(extractPlanText(entries, 3)).toBe("Plan content\n\nMore analysis");
+  });
+
+  it("respects maxEntries parameter", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "First" }] },
+      }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Second" }] },
+      }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Third" }] },
+      }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }),
+    ];
+    expect(extractPlanText(entries, 3, 1)).toBe("Third");
+  });
+
+  it("returns text in chronological order", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Alpha" }] },
+      }),
+      assistantEntry({ message: { role: "assistant", content: [{ type: "text", text: "Beta" }] } }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }),
+    ];
+    const result = extractPlanText(entries, 2);
+    expect(result).toBe("Alpha\n\nBeta");
+    expect(result.indexOf("Alpha")).toBeLessThan(result.indexOf("Beta"));
+  });
+
+  it("skips human entries", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "My analysis" }] },
+      }),
+      humanEntry(),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "After clarification" }] },
+      }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }),
+    ];
+    expect(extractPlanText(entries, 3)).toBe("My analysis\n\nAfter clarification");
   });
 });

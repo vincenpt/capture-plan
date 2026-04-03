@@ -110,9 +110,25 @@ export function getContentBlocks(entry: TranscriptEntry): ContentBlock[] {
   return content;
 }
 
+/** Check whether a transcript file's raw text contains any of the given substrings. Avoids full JSONL parse. */
+export function transcriptContainsPattern(transcriptPath: string, patterns: string[]): boolean {
+  const raw = readFileSync(transcriptPath, "utf8");
+  return patterns.some((p) => raw.includes(p));
+}
+
+/** Check whether a raw transcript string contains any of the given substrings. */
+export function transcriptContainsPatternInString(raw: string, patterns: string[]): boolean {
+  return patterns.some((p) => raw.includes(p));
+}
+
 /** Parse a JSONL transcript file into an array of entries, skipping malformed lines. */
 export function parseTranscript(transcriptPath: string): TranscriptEntry[] {
   const raw = readFileSync(transcriptPath, "utf8");
+  return parseTranscriptFromString(raw);
+}
+
+/** Parse a raw JSONL string into an array of transcript entries, skipping malformed lines. */
+export function parseTranscriptFromString(raw: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
@@ -191,6 +207,27 @@ export function extractConclusionText(
   return collected.join("\n\n");
 }
 
+/** Collect text from the last N assistant entries before a given index, in chronological order. */
+export function extractPlanText(
+  entries: TranscriptEntry[],
+  beforeIdx: number,
+  maxEntries = 3,
+): string {
+  const collected: string[] = [];
+  for (let i = beforeIdx - 1; i >= 0 && collected.length < maxEntries; i--) {
+    const blocks = getContentBlocks(entries[i]);
+    const texts: string[] = [];
+    for (const block of blocks) {
+      if (block.type === "text" && block.text) {
+        texts.push(block.text);
+      }
+    }
+    if (texts.length > 0) collected.push(texts.join("\n\n"));
+  }
+  collected.reverse();
+  return collected.join("\n\n");
+}
+
 const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
 /** Collect unique file paths modified by file-writing tools (Edit, Write, etc.) after a given index. */
@@ -230,8 +267,6 @@ export interface ExecutionStats {
   conclusionText: string;
 }
 
-const MIN_DONE_LENGTH = 50;
-
 /** Select the richest available text for the Summary section body.
  *  Priority: payload (CLI's rendered conclusion) > conclusion (multi-entry tail) >
  *  last single entry > Haiku summary */
@@ -239,10 +274,11 @@ export function selectDoneText(
   payloadMessage: string,
   stats: ExecutionStats,
   summary: string,
+  minLength = 50,
 ): string {
-  if (payloadMessage.length >= MIN_DONE_LENGTH) return payloadMessage;
-  if (stats.conclusionText.length >= MIN_DONE_LENGTH) return stats.conclusionText;
-  if (stats.lastAssistantText.length >= MIN_DONE_LENGTH) return stats.lastAssistantText;
+  if (payloadMessage.length >= minLength) return payloadMessage;
+  if (stats.conclusionText.length >= minLength) return stats.conclusionText;
+  if (stats.lastAssistantText.length >= minLength) return stats.lastAssistantText;
   return summary;
 }
 
@@ -566,4 +602,121 @@ export function collectToolLog(
     totalToolCalls: seq,
     totalErrors,
   };
+}
+
+/** A Skill tool_use detected in the transcript. */
+export interface SkillInvocation {
+  /** Transcript entry index where the Skill tool_use was found. */
+  index: number;
+  /** Skill name from input.skill. */
+  skill: string;
+  /** Optional args from input.args. */
+  args?: string;
+  /** Assistant text from the same turn, before the Skill tool_use block. */
+  contextBefore: string;
+  /** Assistant text from the immediate next assistant turn after the skill completes. */
+  contextAfter: string;
+}
+
+/** Scan transcript for Skill tool_use blocks, capturing invocation metadata and surrounding context. */
+export function findSkillInvocations(entries: TranscriptEntry[]): SkillInvocation[] {
+  const results: SkillInvocation[] = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    const blocks = getContentBlocks(entries[i]);
+    for (const block of blocks) {
+      if (block.type !== "tool_use" || block.name !== "Skill") continue;
+
+      const skill = block.input?.skill;
+      if (typeof skill !== "string") continue;
+
+      const args = typeof block.input?.args === "string" ? block.input.args : undefined;
+
+      // Collect text blocks before the Skill block in this same turn
+      const textsBefore: string[] = [];
+      for (const b of blocks) {
+        if (b === block) break;
+        if (b.type === "text" && b.text) textsBefore.push(b.text);
+      }
+
+      // Find the next assistant turn's text
+      let contextAfter = "";
+      for (let j = i + 1; j < entries.length; j++) {
+        const nextBlocks = getContentBlocks(entries[j]);
+        if (nextBlocks.length === 0) continue; // skip non-assistant entries
+        const texts: string[] = [];
+        for (const b of nextBlocks) {
+          if (b.type === "text" && b.text) texts.push(b.text);
+        }
+        if (texts.length > 0) {
+          contextAfter = texts.join("\n\n");
+          break;
+        }
+      }
+
+      results.push({
+        index: i,
+        skill,
+        args,
+        contextBefore: textsBefore.join("\n\n"),
+        contextAfter,
+      });
+    }
+  }
+
+  return results;
+}
+
+const DEFAULT_SPEC_PATTERN = "/superpowers/specs/";
+const DEFAULT_PLAN_PATTERN = "/superpowers/plans/";
+
+/** A Write tool_use targeting a superpowers spec or plan path. */
+export interface SuperpowersWrite {
+  index: number;
+  type: "spec" | "plan";
+  filePath: string;
+  title: string;
+  content: string;
+}
+
+/** Scan transcript for Write tool_use blocks targeting superpowers spec/plan paths. */
+export function findSuperpowersWrites(
+  entries: TranscriptEntry[],
+  specPattern?: string,
+  planPattern?: string,
+): SuperpowersWrite[] {
+  const sp = specPattern || DEFAULT_SPEC_PATTERN;
+  const pp = planPattern || DEFAULT_PLAN_PATTERN;
+  const results: SuperpowersWrite[] = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    for (const block of getContentBlocks(entries[i])) {
+      if (block.type !== "tool_use" || block.name !== "Write") continue;
+      const filePath = block.input?.file_path;
+      if (typeof filePath !== "string") continue;
+
+      let type: "spec" | "plan" | null = null;
+      if (filePath.includes(pp)) type = "plan";
+      else if (filePath.includes(sp)) type = "spec";
+      if (!type) continue;
+
+      const content = typeof block.input?.content === "string" ? block.input.content : "";
+      const titleMatch = content.match(/^#\s+(.+)/m);
+      const title = titleMatch
+        ? titleMatch[1].trim()
+        : (filePath.split("/").pop() ?? "").replace(/\.md$/, "").replace(/^\d{4}-\d{2}-\d{2}-/, "");
+      results.push({ index: i, type, filePath, title, content });
+    }
+  }
+
+  return results;
+}
+
+/** Return the transcript index of the last superpowers Write (planning/execution boundary).
+ *  Prefers plan writes over spec writes. Returns -1 if no writes found. */
+export function findSuperpowersBoundary(writes: SuperpowersWrite[]): number {
+  if (writes.length === 0) return -1;
+  const plans = writes.filter((w) => w.type === "plan");
+  if (plans.length > 0) return plans[plans.length - 1].index;
+  return writes[writes.length - 1].index;
 }

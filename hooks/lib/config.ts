@@ -36,6 +36,8 @@ export async function loadConfig(cwd?: string): Promise<Config> {
     plan_path: (merged.plan_path as string) || DEFAULT_CONFIG.plan_path,
     journal_path: (merged.journal_path as string) || DEFAULT_CONFIG.journal_path,
     context_cap: contextCap,
+    superpowers_spec_pattern: (merged.superpowers_spec_pattern as string) || undefined,
+    superpowers_plan_pattern: (merged.superpowers_plan_pattern as string) || undefined,
   };
 }
 

@@ -12,7 +12,7 @@ A Claude Code plugin that captures plans and execution summaries to an Obsidian 
 ## Commands
 
 ```bash
-bun test                              # Run all tests (396 tests across 13 files)
+bun test                              # Run all tests (422 tests across 14 files)
 bun test capture-done.test.ts         # Run a single test file
 bun test --grep "pattern"             # Run tests matching a pattern
 bun test --watch                      # Watch mode
@@ -66,12 +66,23 @@ Tests in `hooks/__tests__/` are split by functional suite:
 - `shared.external.test.ts` — mocked Obsidian CLI and Claude API calls
 - `backport-journal.test.ts` — plan backporting workflow
 - `capture-session-start.test.ts` — session initialization
+- `skill-detection.test.ts` — skill invocation detection, pre-check patterns, mixed sessions
 
 Shared test factories live in `helpers/transcript-helpers.ts`.
 
 ### Session State
 
 `hooks/state/{sessionId}.json` bridges the two hooks — written by capture-plan, read by capture-done. States older than 2 hours are discarded.
+
+### Stale TypeScript Language Server
+
+If the LSP tool reports diagnostics about missing exports or types that clearly exist in the code (and tests pass), the TypeScript language server has stale state. Restart it:
+
+```bash
+./scripts/kill-tsserver.sh
+```
+
+This targets only tsserver processes belonging to the current Claude Code session, leaving other sessions' language servers untouched. The LSP respawns tsserver automatically on the next request.
 
 ### Debug Logs
 

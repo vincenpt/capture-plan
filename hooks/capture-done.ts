@@ -2,13 +2,18 @@
 // capture-done.ts — Claude Code Stop Hook
 // Captures the "Done" summary after plan execution completes
 
+import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { DONE_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, SKILL_SYSTEM_PROMPT } from "./lib/prompts.ts";
 import {
   appendRowToJournalSection,
   appendToJournal,
+  type Config,
   createVaultNote,
   debugLog,
   deleteVaultState,
+  detectCcVersion,
+  extractTitle,
   findTranscriptPath,
   formatCcVersionYaml,
   formatDuration,
@@ -23,10 +28,17 @@ import {
   loadConfig,
   mergeTags,
   mergeTagsOnDailyNote,
+  nextCounter,
+  padCounter,
   readCcVersion,
   resolveContextCap,
+  type SessionState,
   scanForVaultState,
+  shortSessionId,
+  stripTitleLine,
   summarizeWithClaude,
+  toSlug,
+  writeVaultState,
 } from "./shared.ts";
 import {
   collectExecutionStats,
@@ -34,19 +46,21 @@ import {
   collectTranscriptStats,
   computeDurationMs,
   findExitPlanIndex,
+  findSkillInvocations,
+  findSuperpowersBoundary,
+  findSuperpowersWrites,
   hasExecutionAfter,
-  parseTranscript,
+  parseTranscriptFromString,
+  type SkillInvocation,
+  type SuperpowersWrite,
   selectDoneText,
+  type TranscriptEntry,
   type TranscriptStats,
+  transcriptContainsPatternInString,
 } from "./transcript.ts";
 
 const DEBUG_LOG = "/tmp/capture-done-debug.log";
 const MIN_DONE_LENGTH = 50;
-
-const DONE_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given context about a completed coding session (plan title, duration, files changed, and execution narrative), output exactly two lines:
-Line 1: A 1-2 sentence summary (max 200 chars). Include concrete outcomes: what was built, changed, or fixed. Mention file count and duration if notable.
-Line 2: 1-2 lowercase kebab-case tags (comma-separated, no # prefix).
-Output ONLY these two lines.`;
 
 interface StopPayload {
   session_id: string;
@@ -55,6 +69,263 @@ interface StopPayload {
   transcript_path?: string;
   last_assistant_message?: string;
   [key: string]: unknown;
+}
+
+/** Build a SessionState on the fly for a superpowers session, creating the plan vault note. */
+async function buildSuperpowersState(
+  sessionId: string,
+  writes: SuperpowersWrite[],
+  entries: TranscriptEntry[],
+  payload: StopPayload,
+  config: Config,
+): Promise<{ state: SessionState; boundaryIdx: number } | null> {
+  // Pick primary: prefer plan over spec
+  const plans = writes.filter((w) => w.type === "plan");
+  const primary = plans.length > 0 ? plans[plans.length - 1] : writes[writes.length - 1];
+  const specs = writes.filter((w) => w.type === "spec");
+
+  const planContent = primary.content;
+  if (!planContent || planContent.length < 20) return null;
+
+  const title = extractTitle(planContent);
+  const slug = toSlug(title);
+  const { dd, mm, yyyy, dateKey, datetime, ampmTime } = getDateParts();
+  const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+
+  const vaultPath = getVaultPath(config.vault);
+  const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null;
+  const counter = dateDirAbsolute ? nextCounter(dateDirAbsolute) : 1;
+
+  const { summary, tags: newTags } = await summarizeWithClaude(planContent, PLAN_SYSTEM_PROMPT);
+  const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`;
+  const planPath = `${planDir}/plan`;
+  const journalPath = getJournalPath(config);
+  const project = getProjectName(payload.cwd);
+  const tagsYaml = formatTagsYaml(newTags);
+
+  // Collect planning-phase stats
+  const boundaryIdx = findSuperpowersBoundary(writes);
+  let planStats: TranscriptStats | null = null;
+  try {
+    if (boundaryIdx >= 0) {
+      planStats = collectTranscriptStats(entries, 0, boundaryIdx);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const contextCap = resolveContextCap(
+    planStats?.peakTurnContext ?? 0,
+    config.context_cap,
+    sessionId,
+  );
+  const modelYaml = formatModelYaml(planStats, contextCap);
+  const ccVersion = detectCcVersion() ?? readCcVersion(sessionId);
+  const ccVersionYaml = formatCcVersionYaml(ccVersion);
+
+  const noteContent = `---
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
+session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
+source: superpowers${primary.filePath ? `\nspec_file: "${primary.filePath}"` : ""}
+---
+# ${title}
+
+${stripTitleLine(planContent)}
+`;
+
+  const createResult = createVaultNote(planPath, noteContent, config.vault);
+  if (!createResult.success) {
+    debugLog("Failed to create superpowers plan note\n", DEBUG_LOG);
+    return null;
+  }
+
+  // If there's a separate spec, create it as a sibling note
+  if (specs.length > 0 && specs[specs.length - 1] !== primary) {
+    const spec = specs[specs.length - 1];
+    const specTitle = extractTitle(spec.content);
+    const specNoteContent = `---
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}
+plan: "[[${planPath}|${title}]]"
+source: superpowers
+---
+# ${specTitle}
+
+${stripTitleLine(spec.content)}
+`;
+    createVaultNote(`${planDir}/spec`, specNoteContent, config.vault);
+  }
+
+  const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${ampmTime}]] | ${summary} |`;
+  appendToJournal(journalEntry, journalPath, config.vault);
+  mergeTagsOnDailyNote(newTags, journalPath, config.vault);
+
+  const state: SessionState = {
+    session_id: sessionId,
+    plan_slug: slug,
+    plan_title: title,
+    plan_dir: planDir,
+    date_key: dateKey,
+    timestamp: new Date().toISOString(),
+    journal_path: journalPath,
+    project,
+    tags: newTags,
+    model: planStats?.model,
+    cc_version: ccVersion,
+    planStats: planStats ?? undefined,
+    source: "superpowers",
+    spec_path: primary.filePath,
+  };
+
+  writeVaultState(state, config.vault);
+  debugLog(`Superpowers state built: ${title} -> ${planPath}\n`, DEBUG_LOG);
+  return { state, boundaryIdx };
+}
+
+/** Build a SessionState on the fly for a skill-only session, creating the activity vault note. */
+async function buildSkillState(
+  sessionId: string,
+  invocations: SkillInvocation[],
+  entries: TranscriptEntry[],
+  payload: StopPayload,
+  config: Config,
+): Promise<{ state: SessionState; boundaryIdx: number } | null> {
+  if (invocations.length === 0) return null;
+
+  // Build narrative from all skill invocations' surrounding context
+  const narrative = invocations
+    .map((inv) => {
+      const parts = [inv.contextBefore, inv.contextAfter].filter(Boolean);
+      return parts.join("\n");
+    })
+    .filter(Boolean)
+    .join("\n\n");
+
+  if (narrative.length < 20) return null;
+
+  // Summarize with Haiku to get title and tags
+  const { summary, tags: newTags } = await summarizeWithClaude(narrative, SKILL_SYSTEM_PROMPT);
+
+  // Use Haiku summary as title, truncated to first sentence or 80 chars
+  const rawTitle = extractTitle(summary) || `${invocations[0].skill} session`;
+  const title = rawTitle.length > 80 ? `${rawTitle.slice(0, 77)}...` : rawTitle;
+  const slug = toSlug(title);
+  const { dd, mm, yyyy, dateKey, datetime, ampmTime } = getDateParts();
+  const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+
+  const vaultPath = getVaultPath(config.vault);
+  const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null;
+  const counter = dateDirAbsolute ? nextCounter(dateDirAbsolute) : 1;
+
+  const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`;
+  const activityPath = `${planDir}/activity`;
+  const journalPath = getJournalPath(config);
+  const project = getProjectName(payload.cwd);
+  const tagsYaml = formatTagsYaml(newTags);
+
+  // Use first skill invocation as boundary
+  const boundaryIdx = invocations[0].index;
+
+  // Collect planning-phase stats (everything before the first skill)
+  let planStats: TranscriptStats | null = null;
+  try {
+    if (boundaryIdx > 0) {
+      planStats = collectTranscriptStats(entries, 0, boundaryIdx);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const contextCap = resolveContextCap(
+    planStats?.peakTurnContext ?? 0,
+    config.context_cap,
+    sessionId,
+  );
+  const modelYaml = formatModelYaml(planStats, contextCap);
+  const ccVersion = detectCcVersion() ?? readCcVersion(sessionId);
+  const ccVersionYaml = formatCcVersionYaml(ccVersion);
+
+  // Build skills YAML list
+  const skillNames = invocations.map((inv) => inv.skill);
+  const uniqueSkills = [...new Set(skillNames)];
+  const skillsYaml = uniqueSkills.map((s) => `  - ${s}`).join("\n");
+
+  // Build skills table
+  const skillsTable = invocations
+    .map((inv) => {
+      const ts = entries[inv.index]?.timestamp;
+      const time = ts
+        ? new Date(ts).toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+          })
+        : "—";
+      return `| ${time} | ${inv.skill} | ${inv.args ?? "—"} |`;
+    })
+    .join("\n");
+
+  // Build context section from surrounding text
+  const contextText = invocations
+    .map((inv) => {
+      const parts: string[] = [];
+      if (inv.contextBefore) parts.push(inv.contextBefore);
+      if (inv.contextAfter) parts.push(inv.contextAfter);
+      return parts.join("\n\n");
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+
+  const noteContent = `---
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
+session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
+source: skill
+skills:
+${skillsYaml}
+---
+# ${title}
+
+## Skills Used
+
+| Time | Skill | Args |
+|------|-------|------|
+${skillsTable}
+
+## Context
+
+${contextText || "_No context captured_"}
+`;
+
+  const createResult = createVaultNote(activityPath, noteContent, config.vault);
+  if (!createResult.success) {
+    debugLog("Failed to create skill activity note\n", DEBUG_LOG);
+    return null;
+  }
+
+  // Journal entry
+  const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${activityPath}\\|${ampmTime}]] | ${summary} |`;
+  appendToJournal(journalEntry, journalPath, config.vault);
+  mergeTagsOnDailyNote(newTags, journalPath, config.vault);
+
+  const state: SessionState = {
+    session_id: sessionId,
+    plan_slug: slug,
+    plan_title: title,
+    plan_dir: planDir,
+    date_key: dateKey,
+    timestamp: new Date().toISOString(),
+    journal_path: journalPath,
+    project,
+    tags: newTags,
+    model: planStats?.model,
+    cc_version: ccVersion,
+    planStats: planStats ?? undefined,
+    source: "skill",
+    skill_name: uniqueSkills.join(","),
+  };
+
+  writeVaultState(state, config.vault);
+  debugLog(`Skill state built: ${title} -> ${activityPath}\n`, DEBUG_LOG);
+  return { state, boundaryIdx };
 }
 
 async function main(): Promise<void> {
@@ -73,52 +344,132 @@ async function main(): Promise<void> {
     // Load config early — needed for vault-based state lookup
     const config = await loadConfig(payload.cwd);
 
-    // Gate: scan vault for pending session state (also cleans up stale states)
-    const state = scanForVaultState(sessionId, config);
-    if (!state) {
-      // Most common case — no plan pending for this session
-      process.exit(0);
-    }
-
-    debugLog(`Found state for session ${sessionId}: ${state.plan_title}\n`, DEBUG_LOG);
-
-    // Resolve vault filesystem path (used for state cleanup and journal appends)
-    const vaultPath = getVaultPath(config.vault);
-
-    // Find transcript
+    // Find transcript early — needed for both plan-mode and superpowers paths
     let transcriptPath = payload.transcript_path || null;
     if (!transcriptPath) {
       transcriptPath = findTranscriptPath(sessionId, payload.cwd);
     }
-    if (!transcriptPath) {
-      debugLog("Cannot find transcript, keeping state for retry\n", DEBUG_LOG);
-      process.exit(0);
+
+    // Resolve vault filesystem path (used for state cleanup and journal appends)
+    const vaultPath = getVaultPath(config.vault);
+
+    // Gate: scan vault for pending session state (also cleans up stale states)
+    let state = scanForVaultState(sessionId, config);
+    let boundaryIdx = -1;
+    let entries: TranscriptEntry[] = [];
+    let isSuperpowers = false;
+
+    if (state) {
+      debugLog(`Found state for session ${sessionId}: ${state.plan_title}\n`, DEBUG_LOG);
+
+      if (!transcriptPath) {
+        debugLog("Cannot find transcript, keeping state for retry\n", DEBUG_LOG);
+        process.exit(0);
+      }
+
+      entries = parseTranscriptFromString(readFileSync(transcriptPath, "utf8"));
+
+      if (state.source === "superpowers") {
+        // State was written by a prior superpowers capture — find boundary from transcript
+        isSuperpowers = true;
+        const spWrites = findSuperpowersWrites(
+          entries,
+          config.superpowers_spec_pattern,
+          config.superpowers_plan_pattern,
+        );
+        boundaryIdx = findSuperpowersBoundary(spWrites);
+      } else if (state.source === "skill") {
+        // State was written by skill capture — find boundary from skill invocations
+        const skillInvocations = findSkillInvocations(entries);
+        boundaryIdx = skillInvocations.length > 0 ? skillInvocations[0].index : -1;
+      } else {
+        boundaryIdx = findExitPlanIndex(entries);
+      }
+
+      if (boundaryIdx === -1) {
+        debugLog("No plan boundary found in transcript\n", DEBUG_LOG);
+        if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
+        process.exit(0);
+      }
+    } else {
+      // No state — cheap pre-check before full transcript parse (single file read)
+      if (!transcriptPath) process.exit(0);
+
+      const rawTranscript = readFileSync(transcriptPath, "utf8");
+      const specPat = config.superpowers_spec_pattern || "/superpowers/specs/";
+      const planPat = config.superpowers_plan_pattern || "/superpowers/plans/";
+      const hasSuperpowers = transcriptContainsPatternInString(rawTranscript, [specPat, planPat]);
+      const hasSkills = transcriptContainsPatternInString(rawTranscript, ['"Skill"']);
+
+      if (!hasSuperpowers && !hasSkills) process.exit(0);
+
+      entries = parseTranscriptFromString(rawTranscript);
+
+      if (hasSuperpowers) {
+        const spWrites = findSuperpowersWrites(entries, specPat, planPat);
+        if (spWrites.length === 0 && !hasSkills) process.exit(0);
+
+        if (spWrites.length > 0) {
+          isSuperpowers = true;
+          debugLog(
+            `Superpowers session detected: ${spWrites.length} spec/plan writes\n`,
+            DEBUG_LOG,
+          );
+
+          const result = await buildSuperpowersState(sessionId, spWrites, entries, payload, config);
+          if (!result) {
+            debugLog("Failed to build superpowers state\n", DEBUG_LOG);
+            process.exit(0);
+          }
+
+          state = result.state;
+          boundaryIdx = result.boundaryIdx;
+        }
+      }
+
+      // Skill-only session (no superpowers state was built above)
+      if (!state && hasSkills) {
+        const skillInvocations = findSkillInvocations(entries);
+        if (skillInvocations.length === 0) process.exit(0);
+
+        debugLog(
+          `Skill session detected: ${skillInvocations.map((s) => s.skill).join(", ")}\n`,
+          DEBUG_LOG,
+        );
+
+        const result = await buildSkillState(sessionId, skillInvocations, entries, payload, config);
+        if (!result) {
+          debugLog("Failed to build skill state\n", DEBUG_LOG);
+          process.exit(0);
+        }
+
+        state = result.state;
+        boundaryIdx = result.boundaryIdx;
+      }
+
+      if (!state) process.exit(0);
     }
 
-    debugLog(`Transcript: ${transcriptPath}\n`, DEBUG_LOG);
-
-    // Parse transcript
-    const entries = parseTranscript(transcriptPath);
-    const exitIdx = findExitPlanIndex(entries);
-    if (exitIdx === -1) {
-      debugLog("No ExitPlanMode in transcript\n", DEBUG_LOG);
+    // Check for execution activity after the planning boundary
+    if (!hasExecutionAfter(entries, boundaryIdx) && state.source !== "skill") {
+      debugLog("No execution tools after plan boundary, waiting for next Stop\n", DEBUG_LOG);
+      if (!isSuperpowers) {
+        // For plan-mode, keep state for retry. For superpowers, state is ephemeral.
+        process.exit(0);
+      }
+      // Superpowers: still capture the plan note even without execution
+      // (state was already created with vault note in buildSuperpowersState)
       if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
       process.exit(0);
     }
 
-    // Check for execution activity after ExitPlanMode
-    if (!hasExecutionAfter(entries, exitIdx)) {
-      debugLog("No execution tools after ExitPlanMode, waiting for next Stop\n", DEBUG_LOG);
-      process.exit(0); // Keep state — plan not yet executed
-    }
-
     // Collect execution stats from transcript
-    const stats = collectExecutionStats(entries, exitIdx);
+    const stats = collectExecutionStats(entries, boundaryIdx);
 
     // Collect detailed transcript stats for the execution phase
     let transcriptStats: TranscriptStats | null = null;
     try {
-      transcriptStats = collectTranscriptStats(entries, exitIdx);
+      transcriptStats = collectTranscriptStats(entries, boundaryIdx);
       debugLog(
         `Execution stats: ${transcriptStats.totalToolCalls} tool calls, model=${transcriptStats.model}\n`,
         DEBUG_LOG,
@@ -208,7 +559,7 @@ async function main(): Promise<void> {
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-plan: "[[${state.plan_dir}/plan|${state.plan_title.replace(/"/g, '\\"')}]]"
+plan: "[[${state.plan_dir}/${state.source === "skill" ? "activity" : "plan"}|${state.plan_title.replace(/"/g, '\\"')}]]"
 duration: "${duration}"${ccVersionYaml}${modelYaml}
 ---
 # Done: ${state.plan_title}
@@ -230,6 +581,43 @@ ${fileList}
       debugLog("Failed to create summary note\n", DEBUG_LOG);
       if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
       process.exit(0);
+    }
+
+    // Create per-skill activity notes for mixed sessions (plan + skills)
+    if (state.source !== "skill") {
+      // For non-skill sessions (plan-mode, superpowers), check if skills were also used
+      const skillInvocations = findSkillInvocations(entries);
+      if (skillInvocations.length > 0) {
+        debugLog(
+          `Mixed session: ${skillInvocations.length} skill(s) detected alongside ${state.source}\n`,
+          DEBUG_LOG,
+        );
+
+        const skillCounts = new Map<string, number>();
+        for (const inv of skillInvocations) {
+          const count = skillCounts.get(inv.skill) ?? 0;
+          skillCounts.set(inv.skill, count + 1);
+          const suffix = count > 0 ? `-${count + 1}` : "";
+          const skillNotePath = `${state.plan_dir}/${inv.skill}${suffix}`;
+          const contextText = [inv.contextBefore, inv.contextAfter].filter(Boolean).join("\n\n");
+          const skillNoteContent = `---
+created: "[[${journalPath}|${datetime}]]"
+plan: "[[${state.plan_dir}/plan|${state.plan_title.replace(/"/g, '\\"')}]]"
+source: skill
+skill: ${inv.skill}
+---
+# ${inv.skill}
+
+${contextText || "_No context captured_"}
+`;
+          const skillResult = createVaultNote(skillNotePath, skillNoteContent, config.vault);
+          if (!skillResult.success) {
+            debugLog(`Failed to create skill note: ${skillNotePath}\n`, DEBUG_LOG);
+          } else {
+            debugLog(`Skill note captured -> ${skillNotePath}.md\n`, DEBUG_LOG);
+          }
+        }
+      }
     }
 
     // Create tools-stats.md with combined stats from both phases
@@ -257,8 +645,8 @@ ${fileList}
     }
 
     // Create tools-log.md with chronological tool use log
-    const planLog = planStats ? collectToolLog(entries, 0, exitIdx) : null;
-    const execLog = transcriptStats ? collectToolLog(entries, exitIdx) : null;
+    const planLog = planStats ? collectToolLog(entries, 0, boundaryIdx) : null;
+    const execLog = transcriptStats ? collectToolLog(entries, boundaryIdx) : null;
 
     const toolsLogResult = formatToolsLogContent({
       planLog,

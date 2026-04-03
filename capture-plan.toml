@@ -13,3 +13,8 @@ journal_path = "Journal"
 # Context window cap in tokens (auto-detected, override if needed)
 # Standard: 200000, Max/Enterprise: 1000000
 # context_cap = 1000000
+
+# Superpowers integration — auto-detected from transcript at session end.
+# Override patterns if superpowers writes to non-default directories.
+# superpowers_spec_pattern = "/superpowers/specs/"
+# superpowers_plan_pattern = "/superpowers/plans/"

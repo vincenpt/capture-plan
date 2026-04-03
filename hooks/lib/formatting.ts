@@ -404,7 +404,7 @@ export function formatToolsLogContent(opts: {
       const toolNames = [...new Set(turn.tools.map((t) => t.name))].join(", ");
       const toolLabel = toolNames ? `: ${toolNames}` : "";
       sections.push(
-        `### Turn ${turn.turnNumber}${toolLabel} — ${tsLabel} (${durLabel} | ${tokLabel})${sidechain} ^turn-${turn.turnNumber}\n`,
+        `### Turn ${turn.turnNumber}${toolLabel} — ${tsLabel} (${durLabel} | ${tokLabel})${sidechain}\n^turn-${turn.turnNumber}\n`,
       );
 
       if (turn.isSidechain && turn.agentId) {
