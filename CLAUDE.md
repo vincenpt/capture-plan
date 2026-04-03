@@ -74,6 +74,16 @@ Shared test factories live in `helpers/transcript-helpers.ts`.
 
 `hooks/state/{sessionId}.json` bridges the two hooks — written by capture-plan, read by capture-done. States older than 2 hours are discarded.
 
+### Stale TypeScript Language Server
+
+If the LSP tool reports diagnostics about missing exports or types that clearly exist in the code (and tests pass), the TypeScript language server has stale state. Restart it:
+
+```bash
+./scripts/kill-tsserver.sh
+```
+
+This targets only tsserver processes belonging to the current Claude Code session, leaving other sessions' language servers untouched. The LSP respawns tsserver automatically on the next request.
+
 ### Debug Logs
 
 Written to `/tmp/capture-plan-debug.log` and `/tmp/capture-done-debug.log`.
