@@ -391,6 +391,10 @@ async function main(): Promise<void> {
           config.superpowers_plan_pattern,
         );
         boundaryIdx = findSuperpowersBoundary(spWrites);
+      } else if (state.source === "skill") {
+        // State was written by skill capture — find boundary from skill invocations
+        const skillInvocations = findSkillInvocations(entries);
+        boundaryIdx = skillInvocations.length > 0 ? skillInvocations[0].index : -1;
       } else {
         boundaryIdx = findExitPlanIndex(entries);
       }
@@ -451,7 +455,7 @@ async function main(): Promise<void> {
     }
 
     // Check for execution activity after the planning boundary
-    if (!hasExecutionAfter(entries, boundaryIdx)) {
+    if (!hasExecutionAfter(entries, boundaryIdx) && state.source !== "skill") {
       debugLog("No execution tools after plan boundary, waiting for next Stop\n", DEBUG_LOG);
       if (!isSuperpowers) {
         // For plan-mode, keep state for retry. For superpowers, state is ephemeral.
@@ -559,7 +563,7 @@ async function main(): Promise<void> {
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-plan: "[[${state.plan_dir}/plan|${state.plan_title.replace(/"/g, '\\"')}]]"
+plan: "[[${state.plan_dir}/${state.source === "skill" ? "activity" : "plan"}|${state.plan_title.replace(/"/g, '\\"')}]]"
 duration: "${duration}"${ccVersionYaml}${modelYaml}
 ---
 # Done: ${state.plan_title}
