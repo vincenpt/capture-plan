@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   EXECUTION_TOOLS,
+  extractPlanText,
   findExitPlanIndex,
   findSuperpowersBoundary,
   findSuperpowersWrites,
@@ -387,5 +388,95 @@ describe("findSuperpowersBoundary", () => {
 
   it("returns -1 for empty writes", () => {
     expect(findSuperpowersBoundary([])).toBe(-1);
+  });
+});
+
+describe("extractPlanText", () => {
+  it("collects last 3 assistant text messages before exitIdx", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Analysis of the bug" }] },
+      }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Here is what I found" }] },
+      }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Proposed fix approach" }] },
+      }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Final plan summary" }] },
+      }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }), // exitIdx = 4
+    ];
+    // Should get last 3 before exitIdx (indices 1, 2, 3)
+    expect(extractPlanText(entries, 4)).toBe(
+      "Here is what I found\n\nProposed fix approach\n\nFinal plan summary",
+    );
+  });
+
+  it("returns empty string when no text before exitIdx", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({ tools: [{ name: "Read" }] }),
+      assistantEntry({ tools: [{ name: "Grep" }] }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }),
+    ];
+    expect(extractPlanText(entries, 2)).toBe("");
+  });
+
+  it("skips tool_use-only entries", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Plan content" }] },
+      }),
+      assistantEntry({ tools: [{ name: "Read" }] }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "More analysis" }] },
+      }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }),
+    ];
+    expect(extractPlanText(entries, 3)).toBe("Plan content\n\nMore analysis");
+  });
+
+  it("respects maxEntries parameter", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "First" }] },
+      }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Second" }] },
+      }),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Third" }] },
+      }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }),
+    ];
+    expect(extractPlanText(entries, 3, 1)).toBe("Third");
+  });
+
+  it("returns text in chronological order", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "Alpha" }] },
+      }),
+      assistantEntry({ message: { role: "assistant", content: [{ type: "text", text: "Beta" }] } }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }),
+    ];
+    const result = extractPlanText(entries, 2);
+    expect(result).toBe("Alpha\n\nBeta");
+    expect(result.indexOf("Alpha")).toBeLessThan(result.indexOf("Beta"));
+  });
+
+  it("skips human entries", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "My analysis" }] },
+      }),
+      humanEntry(),
+      assistantEntry({
+        message: { role: "assistant", content: [{ type: "text", text: "After clarification" }] },
+      }),
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }),
+    ];
+    expect(extractPlanText(entries, 3)).toBe("My analysis\n\nAfter clarification");
   });
 });

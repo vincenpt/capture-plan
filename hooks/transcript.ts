@@ -207,6 +207,27 @@ export function extractConclusionText(
   return collected.join("\n\n");
 }
 
+/** Collect text from the last N assistant entries before a given index, in chronological order. */
+export function extractPlanText(
+  entries: TranscriptEntry[],
+  beforeIdx: number,
+  maxEntries = 3,
+): string {
+  const collected: string[] = [];
+  for (let i = beforeIdx - 1; i >= 0 && collected.length < maxEntries; i--) {
+    const blocks = getContentBlocks(entries[i]);
+    const texts: string[] = [];
+    for (const block of blocks) {
+      if (block.type === "text" && block.text) {
+        texts.push(block.text);
+      }
+    }
+    if (texts.length > 0) collected.push(texts.join("\n\n"));
+  }
+  collected.reverse();
+  return collected.join("\n\n");
+}
+
 const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
 /** Collect unique file paths modified by file-writing tools (Edit, Write, etc.) after a given index. */
