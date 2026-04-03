@@ -33,8 +33,10 @@ import {
 } from "./shared.ts";
 import {
   collectTranscriptStats,
+  extractPlanText,
   findExitPlanIndex,
   parseTranscript,
+  type TranscriptEntry,
   type TranscriptStats,
 } from "./transcript.ts";
 
@@ -42,6 +44,7 @@ const DEBUG_LOG = "/tmp/capture-plan-debug.log";
 
 interface HookPayload {
   session_id: string;
+  transcript_path?: string;
   hook_event_name: string;
   tool_name: string;
   cwd?: string;
@@ -95,9 +98,31 @@ async function main(): Promise<void> {
     const hookEvent = payload.hook_event_name || "";
     const sessionId = payload.session_id || "unknown";
 
-    const extraction = await extractPlanContent(payload);
+    let extraction = await extractPlanContent(payload);
+
+    // Transcript fallback: parse once, reuse for both plan extraction and stats
+    let entries: TranscriptEntry[] | null = null;
+    let exitIdx = -1;
+    const transcriptPath = payload.transcript_path || findTranscriptPath(sessionId, payload.cwd);
+
+    if ((!extraction || extraction.content.length < 20) && transcriptPath) {
+      try {
+        entries = parseTranscript(transcriptPath);
+        exitIdx = findExitPlanIndex(entries);
+        if (exitIdx >= 0) {
+          const planText = extractPlanText(entries, exitIdx);
+          if (planText.length >= 20) {
+            extraction = { content: planText, source: "transcript", file: "" };
+            debugLog(`Plan extracted from transcript (${planText.length} chars)\n`, DEBUG_LOG);
+          }
+        }
+      } catch (err) {
+        debugLog(`Transcript fallback failed: ${err}\n`, DEBUG_LOG);
+      }
+    }
+
     if (!extraction || extraction.content.length < 20) {
-      debugLog(`No valid plan content\n`, DEBUG_LOG);
+      debugLog("No valid plan content\n", DEBUG_LOG);
       process.exit(0);
     }
 
@@ -114,20 +139,19 @@ async function main(): Promise<void> {
       DEBUG_LOG,
     );
 
-    // Collect planning-phase stats from transcript
+    // Collect planning-phase stats from transcript (reuse parsed entries if available)
     let stats: TranscriptStats | null = null;
     try {
-      const transcriptPath = findTranscriptPath(sessionId, payload.cwd);
-      if (transcriptPath) {
-        const entries = parseTranscript(transcriptPath);
-        const exitIdx = findExitPlanIndex(entries);
-        if (exitIdx >= 0) {
-          stats = collectTranscriptStats(entries, 0, exitIdx);
-          debugLog(
-            `Transcript stats collected: ${stats.totalToolCalls} tool calls, model=${stats.model}\n`,
-            DEBUG_LOG,
-          );
-        }
+      if (!entries && transcriptPath) {
+        entries = parseTranscript(transcriptPath);
+        exitIdx = findExitPlanIndex(entries);
+      }
+      if (entries && exitIdx >= 0) {
+        stats = collectTranscriptStats(entries, 0, exitIdx);
+        debugLog(
+          `Transcript stats collected: ${stats.totalToolCalls} tool calls, model=${stats.model}\n`,
+          DEBUG_LOG,
+        );
       }
     } catch (err) {
       debugLog(`Failed to collect transcript stats: ${err}\n`, DEBUG_LOG);
