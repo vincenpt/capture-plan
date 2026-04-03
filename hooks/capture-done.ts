@@ -44,10 +44,12 @@ import {
   collectTranscriptStats,
   computeDurationMs,
   findExitPlanIndex,
+  findSkillInvocations,
   findSuperpowersBoundary,
   findSuperpowersWrites,
   hasExecutionAfter,
   parseTranscript,
+  type SkillInvocation,
   type SuperpowersWrite,
   selectDoneText,
   type TranscriptEntry,
@@ -66,6 +68,11 @@ Output ONLY these two lines.`;
 const PLAN_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given an engineering plan or design spec, output exactly two lines:
 Line 1: A 1-2 sentence summary (max 200 chars). Be specific about what will be built or changed.
 Line 2: 1-2 lowercase kebab-case tags relevant to the plan topic (comma-separated, no # prefix).
+Output ONLY these two lines.`;
+
+const SKILL_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given context about a coding session where automated skills were used (skill names, context, and outcomes), output exactly two lines:
+Line 1: A 1-2 sentence summary (max 200 chars). Include what skills ran and their concrete outcomes.
+Line 2: 1-2 lowercase kebab-case tags relevant to the activity (comma-separated, no # prefix).
 Output ONLY these two lines.`;
 
 interface StopPayload {
@@ -187,6 +194,153 @@ ${stripTitleLine(spec.content)}
   return { state, boundaryIdx };
 }
 
+/** Build a SessionState on the fly for a skill-only session, creating the activity vault note. */
+async function buildSkillState(
+  sessionId: string,
+  invocations: SkillInvocation[],
+  entries: TranscriptEntry[],
+  payload: StopPayload,
+  config: Config,
+): Promise<{ state: SessionState; boundaryIdx: number } | null> {
+  if (invocations.length === 0) return null;
+
+  // Build narrative from all skill invocations' surrounding context
+  const narrative = invocations
+    .map((inv) => {
+      const parts = [inv.contextBefore, inv.contextAfter].filter(Boolean);
+      return parts.join("\n");
+    })
+    .filter(Boolean)
+    .join("\n\n");
+
+  if (narrative.length < 20) return null;
+
+  // Summarize with Haiku to get title and tags
+  const { summary, tags: newTags } = await summarizeWithClaude(narrative, SKILL_SYSTEM_PROMPT);
+
+  // Use Haiku summary as title, truncated to first sentence or 80 chars
+  const rawTitle = extractTitle(summary) || `${invocations[0].skill} session`;
+  const title = rawTitle.length > 80 ? `${rawTitle.slice(0, 77)}...` : rawTitle;
+  const slug = toSlug(title);
+  const { dd, mm, yyyy, dateKey, datetime, ampmTime } = getDateParts();
+  const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+
+  const vaultPath = getVaultPath(config.vault);
+  const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null;
+  const counter = dateDirAbsolute ? nextCounter(dateDirAbsolute) : 1;
+
+  const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`;
+  const activityPath = `${planDir}/activity`;
+  const journalPath = getJournalPath(config);
+  const project = getProjectName(payload.cwd);
+  const tagsYaml = formatTagsYaml(newTags);
+
+  // Use first skill invocation as boundary
+  const boundaryIdx = invocations[0].index;
+
+  // Collect planning-phase stats (everything before the first skill)
+  let planStats: TranscriptStats | null = null;
+  try {
+    if (boundaryIdx > 0) {
+      planStats = collectTranscriptStats(entries, 0, boundaryIdx);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const contextCap = resolveContextCap(
+    planStats?.peakTurnContext ?? 0,
+    config.context_cap,
+    sessionId,
+  );
+  const modelYaml = formatModelYaml(planStats, contextCap);
+  const ccVersion = detectCcVersion() ?? readCcVersion(sessionId);
+  const ccVersionYaml = formatCcVersionYaml(ccVersion);
+
+  // Build skills YAML list
+  const skillNames = invocations.map((inv) => inv.skill);
+  const uniqueSkills = [...new Set(skillNames)];
+  const skillsYaml = uniqueSkills.map((s) => `  - ${s}`).join("\n");
+
+  // Build skills table
+  const skillsTable = invocations
+    .map((inv) => {
+      const time =
+        inv.index < entries.length && entries[inv.index].timestamp
+          ? new Date(entries[inv.index].timestamp as string).toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
+            })
+          : "—";
+      return `| ${time} | ${inv.skill} | ${inv.args ?? "—"} |`;
+    })
+    .join("\n");
+
+  // Build context section from surrounding text
+  const contextText = invocations
+    .map((inv) => {
+      const parts: string[] = [];
+      if (inv.contextBefore) parts.push(inv.contextBefore);
+      if (inv.contextAfter) parts.push(inv.contextAfter);
+      return parts.join("\n\n");
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+
+  const noteContent = `---
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
+session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
+source: skill
+skills:
+${skillsYaml}
+---
+# ${title}
+
+## Skills Used
+
+| Time | Skill | Args |
+|------|-------|------|
+${skillsTable}
+
+## Context
+
+${contextText || "_No context captured_"}
+`;
+
+  const createResult = createVaultNote(activityPath, noteContent, config.vault);
+  if (!createResult.success) {
+    debugLog("Failed to create skill activity note\n", DEBUG_LOG);
+    return null;
+  }
+
+  // Journal entry
+  const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${activityPath}\\|${ampmTime}]] | ${summary} |`;
+  appendToJournal(journalEntry, journalPath, config.vault);
+  mergeTagsOnDailyNote(newTags, journalPath, config.vault);
+
+  const state: SessionState = {
+    session_id: sessionId,
+    plan_slug: slug,
+    plan_title: title,
+    plan_dir: planDir,
+    date_key: dateKey,
+    timestamp: new Date().toISOString(),
+    journal_path: journalPath,
+    project,
+    tags: newTags,
+    model: planStats?.model,
+    cc_version: ccVersion,
+    planStats: planStats ?? undefined,
+    source: "skill",
+    skill_name: uniqueSkills.join(","),
+  };
+
+  writeVaultState(state, config.vault);
+  debugLog(`Skill state built: ${title} -> ${activityPath}\n`, DEBUG_LOG);
+  return { state, boundaryIdx };
+}
+
 async function main(): Promise<void> {
   console.error("[capture-done] hook invoked");
   try {
@@ -249,25 +403,51 @@ async function main(): Promise<void> {
     } else {
       // No state — cheap pre-check before full transcript parse
       if (!transcriptPath) process.exit(0);
+
+      // Check for superpowers writes first
       const specPat = config.superpowers_spec_pattern || "/superpowers/specs/";
       const planPat = config.superpowers_plan_pattern || "/superpowers/plans/";
-      if (!transcriptContainsPattern(transcriptPath, [specPat, planPat])) process.exit(0);
+      const hasSuperpowers = transcriptContainsPattern(transcriptPath, [specPat, planPat]);
+      const hasSkills = !hasSuperpowers && transcriptContainsPattern(transcriptPath, ['"Skill"']);
+
+      if (!hasSuperpowers && !hasSkills) process.exit(0);
 
       entries = parseTranscript(transcriptPath);
-      const spWrites = findSuperpowersWrites(entries, specPat, planPat);
-      if (spWrites.length === 0) process.exit(0);
 
-      isSuperpowers = true;
-      debugLog(`Superpowers session detected: ${spWrites.length} spec/plan writes\n`, DEBUG_LOG);
+      if (hasSuperpowers) {
+        const spWrites = findSuperpowersWrites(entries, specPat, planPat);
+        if (spWrites.length === 0) process.exit(0);
 
-      const result = await buildSuperpowersState(sessionId, spWrites, entries, payload, config);
-      if (!result) {
-        debugLog("Failed to build superpowers state\n", DEBUG_LOG);
-        process.exit(0);
+        isSuperpowers = true;
+        debugLog(`Superpowers session detected: ${spWrites.length} spec/plan writes\n`, DEBUG_LOG);
+
+        const result = await buildSuperpowersState(sessionId, spWrites, entries, payload, config);
+        if (!result) {
+          debugLog("Failed to build superpowers state\n", DEBUG_LOG);
+          process.exit(0);
+        }
+
+        state = result.state;
+        boundaryIdx = result.boundaryIdx;
+      } else {
+        // Skill detection path
+        const skillInvocations = findSkillInvocations(entries);
+        if (skillInvocations.length === 0) process.exit(0);
+
+        debugLog(
+          `Skill session detected: ${skillInvocations.map((s) => s.skill).join(", ")}\n`,
+          DEBUG_LOG,
+        );
+
+        const result = await buildSkillState(sessionId, skillInvocations, entries, payload, config);
+        if (!result) {
+          debugLog("Failed to build skill state\n", DEBUG_LOG);
+          process.exit(0);
+        }
+
+        state = result.state;
+        boundaryIdx = result.boundaryIdx;
       }
-
-      state = result.state;
-      boundaryIdx = result.boundaryIdx;
     }
 
     // Check for execution activity after the planning boundary

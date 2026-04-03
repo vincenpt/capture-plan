@@ -79,8 +79,9 @@ Analogous to `buildSuperpowersState()`. Steps:
 
 1. **Select primary skill**: Use the first skill invocation as the primary (used for boundary detection)
 2. **Set boundary**: The first `SkillInvocation.index` marks the planning/execution split
-3. **Build narrative**: Concatenate contextBefore + contextAfter from all skill invocations
-4. **Summarize with Haiku**: Send narrative to Claude Haiku for AI-generated title and summary. Use a system prompt tailored for skill sessions:
+3. 
+4. **Build narrative**: Concatenate contextBefore + contextAfter from all skill invocations
+5. **Summarize with Haiku**: Send narrative to Claude Haiku for AI-generated title and summary. Use a system prompt tailored for skill sessions:
    ```
    You are a concise note-taking assistant. Given context about a coding session
    where automated skills were used, output exactly two lines:
@@ -88,10 +89,10 @@ Analogous to `buildSuperpowersState()`. Steps:
    their concrete outcomes.
    Line 2: 1-2 lowercase kebab-case tags (comma-separated, no # prefix).
    ```
-5. **Create directory**: `<plan_path>/YYYY/MM-DD/NNN-<slug>/`
-6. **Write activity.md**: Primary note with frontmatter and skill activity
-7. **Journal entry**: Append to daily journal
-8. **Return SessionState**: With `source: "skill"`, `skill_name: <primary>`
+6. **Create directory**: `<plan_path>/YYYY/MM-DD/NNN-<slug>/`
+7. **Write activity.md**: Primary note with frontmatter and skill activity
+8. **Journal entry**: Append to daily journal
+9. **Return SessionState**: With `source: "skill"`, `skill_name: <primary>`
 
 ## Note Structure
 
