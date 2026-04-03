@@ -574,6 +574,69 @@ export function collectToolLog(
   };
 }
 
+/** A Skill tool_use detected in the transcript. */
+export interface SkillInvocation {
+  /** Transcript entry index where the Skill tool_use was found. */
+  index: number;
+  /** Skill name from input.skill. */
+  skill: string;
+  /** Optional args from input.args. */
+  args?: string;
+  /** Assistant text from the same turn, before the Skill tool_use block. */
+  contextBefore: string;
+  /** Assistant text from the immediate next assistant turn after the skill completes. */
+  contextAfter: string;
+}
+
+/** Scan transcript for Skill tool_use blocks, capturing invocation metadata and surrounding context. */
+export function findSkillInvocations(entries: TranscriptEntry[]): SkillInvocation[] {
+  const results: SkillInvocation[] = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    const blocks = getContentBlocks(entries[i]);
+    for (const block of blocks) {
+      if (block.type !== "tool_use" || block.name !== "Skill") continue;
+
+      const skill = block.input?.skill;
+      if (typeof skill !== "string") continue;
+
+      const args = typeof block.input?.args === "string" ? block.input.args : undefined;
+
+      // Collect text blocks before the Skill block in this same turn
+      const textsBefore: string[] = [];
+      for (const b of blocks) {
+        if (b === block) break;
+        if (b.type === "text" && b.text) textsBefore.push(b.text);
+      }
+
+      // Find the next assistant turn's text
+      let contextAfter = "";
+      for (let j = i + 1; j < entries.length; j++) {
+        const nextBlocks = getContentBlocks(entries[j]);
+        if (nextBlocks.length === 0) continue; // skip non-assistant entries
+        const texts: string[] = [];
+        for (const b of nextBlocks) {
+          if (b.type === "text" && b.text) texts.push(b.text);
+        }
+        if (texts.length > 0) {
+          contextAfter = texts.join("\n\n");
+          break;
+        }
+      }
+
+      results.push({
+        index: i,
+        skill,
+        args,
+        contextBefore: textsBefore.join("\n\n"),
+        contextAfter,
+      });
+    }
+  }
+
+  return results;
+}
+
 const DEFAULT_SPEC_PATTERN = "/superpowers/specs/";
 const DEFAULT_PLAN_PATTERN = "/superpowers/plans/";
 
