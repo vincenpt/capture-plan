@@ -587,6 +587,39 @@ ${fileList}
       process.exit(0);
     }
 
+    // Create per-skill activity notes for mixed sessions (plan + skills)
+    if (state.source !== "skill") {
+      // For non-skill sessions (plan-mode, superpowers), check if skills were also used
+      const skillInvocations = findSkillInvocations(entries);
+      if (skillInvocations.length > 0) {
+        debugLog(
+          `Mixed session: ${skillInvocations.length} skill(s) detected alongside ${state.source}\n`,
+          DEBUG_LOG,
+        );
+
+        for (const inv of skillInvocations) {
+          const skillNotePath = `${state.plan_dir}/${inv.skill}`;
+          const contextText = [inv.contextBefore, inv.contextAfter].filter(Boolean).join("\n\n");
+          const skillNoteContent = `---
+created: "[[${journalPath}|${datetime}]]"
+plan: "[[${state.plan_dir}/plan|${state.plan_title.replace(/"/g, '\\"')}]]"
+source: skill
+skill: ${inv.skill}
+---
+# ${inv.skill}
+
+${contextText || "_No context captured_"}
+`;
+          const skillResult = createVaultNote(skillNotePath, skillNoteContent, config.vault);
+          if (!skillResult.success) {
+            debugLog(`Failed to create skill note: ${skillNotePath}\n`, DEBUG_LOG);
+          } else {
+            debugLog(`Skill note captured -> ${skillNotePath}.md\n`, DEBUG_LOG);
+          }
+        }
+      }
+    }
+
     // Create tools-stats.md with combined stats from both phases
     const planStats = state.planStats ?? null;
     const toolsNoteContent = formatToolsNoteContent({
