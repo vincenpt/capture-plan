@@ -3,6 +3,7 @@
 // Captures plans and persists them to Obsidian vault
 
 import { join } from "node:path";
+import { PLAN_SYSTEM_PROMPT } from "./lib/prompts.ts";
 import {
   appendToJournal,
   createVaultNote,
@@ -38,11 +39,6 @@ import {
 } from "./transcript.ts";
 
 const DEBUG_LOG = "/tmp/capture-plan-debug.log";
-
-const PLAN_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given an engineering plan, output exactly two lines:
-Line 1: A 1-2 sentence summary (max 200 chars). Be specific about what will be built or changed.
-Line 2: 1-2 lowercase kebab-case tags relevant to the plan topic (comma-separated, no # prefix).
-Output ONLY these two lines.`;
 
 interface HookPayload {
   session_id: string;

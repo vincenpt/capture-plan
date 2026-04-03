@@ -2,7 +2,9 @@
 // capture-done.ts — Claude Code Stop Hook
 // Captures the "Done" summary after plan execution completes
 
+import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { DONE_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, SKILL_SYSTEM_PROMPT } from "./lib/prompts.ts";
 import {
   appendRowToJournalSection,
   appendToJournal,
@@ -48,32 +50,17 @@ import {
   findSuperpowersBoundary,
   findSuperpowersWrites,
   hasExecutionAfter,
-  parseTranscript,
+  parseTranscriptFromString,
   type SkillInvocation,
   type SuperpowersWrite,
   selectDoneText,
   type TranscriptEntry,
   type TranscriptStats,
-  transcriptContainsPattern,
+  transcriptContainsPatternInString,
 } from "./transcript.ts";
 
 const DEBUG_LOG = "/tmp/capture-done-debug.log";
 const MIN_DONE_LENGTH = 50;
-
-const DONE_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given context about a completed coding session (plan title, duration, files changed, and execution narrative), output exactly two lines:
-Line 1: A 1-2 sentence summary (max 200 chars). Include concrete outcomes: what was built, changed, or fixed. Mention file count and duration if notable.
-Line 2: 1-2 lowercase kebab-case tags (comma-separated, no # prefix).
-Output ONLY these two lines.`;
-
-const PLAN_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given an engineering plan or design spec, output exactly two lines:
-Line 1: A 1-2 sentence summary (max 200 chars). Be specific about what will be built or changed.
-Line 2: 1-2 lowercase kebab-case tags relevant to the plan topic (comma-separated, no # prefix).
-Output ONLY these two lines.`;
-
-const SKILL_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given context about a coding session where automated skills were used (skill names, context, and outcomes), output exactly two lines:
-Line 1: A 1-2 sentence summary (max 200 chars). Include what skills ran and their concrete outcomes.
-Line 2: 1-2 lowercase kebab-case tags relevant to the activity (comma-separated, no # prefix).
-Output ONLY these two lines.`;
 
 interface StopPayload {
   session_id: string;
@@ -380,7 +367,7 @@ async function main(): Promise<void> {
         process.exit(0);
       }
 
-      entries = parseTranscript(transcriptPath);
+      entries = parseTranscriptFromString(readFileSync(transcriptPath, "utf8"));
 
       if (state.source === "superpowers") {
         // State was written by a prior superpowers capture — find boundary from transcript
@@ -405,36 +392,43 @@ async function main(): Promise<void> {
         process.exit(0);
       }
     } else {
-      // No state — cheap pre-check before full transcript parse
+      // No state — cheap pre-check before full transcript parse (single file read)
       if (!transcriptPath) process.exit(0);
 
-      // Check for superpowers writes first
+      const rawTranscript = readFileSync(transcriptPath, "utf8");
       const specPat = config.superpowers_spec_pattern || "/superpowers/specs/";
       const planPat = config.superpowers_plan_pattern || "/superpowers/plans/";
-      const hasSuperpowers = transcriptContainsPattern(transcriptPath, [specPat, planPat]);
-      const hasSkills = !hasSuperpowers && transcriptContainsPattern(transcriptPath, ['"Skill"']);
+      const hasSuperpowers = transcriptContainsPatternInString(rawTranscript, [specPat, planPat]);
+      const hasSkills = transcriptContainsPatternInString(rawTranscript, ['"Skill"']);
 
       if (!hasSuperpowers && !hasSkills) process.exit(0);
 
-      entries = parseTranscript(transcriptPath);
+      entries = parseTranscriptFromString(rawTranscript);
 
       if (hasSuperpowers) {
         const spWrites = findSuperpowersWrites(entries, specPat, planPat);
-        if (spWrites.length === 0) process.exit(0);
+        if (spWrites.length === 0 && !hasSkills) process.exit(0);
 
-        isSuperpowers = true;
-        debugLog(`Superpowers session detected: ${spWrites.length} spec/plan writes\n`, DEBUG_LOG);
+        if (spWrites.length > 0) {
+          isSuperpowers = true;
+          debugLog(
+            `Superpowers session detected: ${spWrites.length} spec/plan writes\n`,
+            DEBUG_LOG,
+          );
 
-        const result = await buildSuperpowersState(sessionId, spWrites, entries, payload, config);
-        if (!result) {
-          debugLog("Failed to build superpowers state\n", DEBUG_LOG);
-          process.exit(0);
+          const result = await buildSuperpowersState(sessionId, spWrites, entries, payload, config);
+          if (!result) {
+            debugLog("Failed to build superpowers state\n", DEBUG_LOG);
+            process.exit(0);
+          }
+
+          state = result.state;
+          boundaryIdx = result.boundaryIdx;
         }
+      }
 
-        state = result.state;
-        boundaryIdx = result.boundaryIdx;
-      } else {
-        // Skill detection path
+      // Skill-only session (no superpowers state was built above)
+      if (!state && hasSkills) {
         const skillInvocations = findSkillInvocations(entries);
         if (skillInvocations.length === 0) process.exit(0);
 
@@ -452,6 +446,8 @@ async function main(): Promise<void> {
         state = result.state;
         boundaryIdx = result.boundaryIdx;
       }
+
+      if (!state) process.exit(0);
     }
 
     // Check for execution activity after the planning boundary

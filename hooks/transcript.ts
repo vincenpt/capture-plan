@@ -116,9 +116,19 @@ export function transcriptContainsPattern(transcriptPath: string, patterns: stri
   return patterns.some((p) => raw.includes(p));
 }
 
+/** Check whether a raw transcript string contains any of the given substrings. */
+export function transcriptContainsPatternInString(raw: string, patterns: string[]): boolean {
+  return patterns.some((p) => raw.includes(p));
+}
+
 /** Parse a JSONL transcript file into an array of entries, skipping malformed lines. */
 export function parseTranscript(transcriptPath: string): TranscriptEntry[] {
   const raw = readFileSync(transcriptPath, "utf8");
+  return parseTranscriptFromString(raw);
+}
+
+/** Parse a raw JSONL string into an array of transcript entries, skipping malformed lines. */
+export function parseTranscriptFromString(raw: string): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
@@ -236,8 +246,6 @@ export interface ExecutionStats {
   conclusionText: string;
 }
 
-const MIN_DONE_LENGTH = 50;
-
 /** Select the richest available text for the Summary section body.
  *  Priority: payload (CLI's rendered conclusion) > conclusion (multi-entry tail) >
  *  last single entry > Haiku summary */
@@ -245,10 +253,11 @@ export function selectDoneText(
   payloadMessage: string,
   stats: ExecutionStats,
   summary: string,
+  minLength = 50,
 ): string {
-  if (payloadMessage.length >= MIN_DONE_LENGTH) return payloadMessage;
-  if (stats.conclusionText.length >= MIN_DONE_LENGTH) return stats.conclusionText;
-  if (stats.lastAssistantText.length >= MIN_DONE_LENGTH) return stats.lastAssistantText;
+  if (payloadMessage.length >= minLength) return payloadMessage;
+  if (stats.conclusionText.length >= minLength) return stats.conclusionText;
+  if (stats.lastAssistantText.length >= minLength) return stats.lastAssistantText;
   return summary;
 }
 
