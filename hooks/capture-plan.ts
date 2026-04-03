@@ -192,6 +192,7 @@ ${stripTitleLine(planContent)}
       model: stats?.model,
       cc_version: ccVersion,
       planStats: stats ?? undefined,
+      source: "plan-mode",
     };
     const stateWritten = writeVaultState(state, config.vault);
     if (!stateWritten) {

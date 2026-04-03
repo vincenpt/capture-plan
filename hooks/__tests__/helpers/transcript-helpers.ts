@@ -1,4 +1,4 @@
-import type { TranscriptEntry } from "../../transcript.ts";
+import type { ContentBlock, TranscriptEntry } from "../../transcript.ts";
 
 /** Factory for building assistant transcript entries in tests. */
 export function assistantEntry(
@@ -21,6 +21,30 @@ export function assistantEntry(
     timestamp: "2026-03-30T14:00:00.000Z",
     message,
     ...rest,
+  };
+}
+
+/** Factory for an assistant entry containing a Write tool_use. */
+export function writeEntry(
+  filePath: string,
+  content = "# Test Content\n\nBody text.",
+  overrides: Partial<TranscriptEntry> = {},
+): TranscriptEntry {
+  const block: ContentBlock = {
+    type: "tool_use",
+    name: "Write",
+    id: `write-${filePath.split("/").pop()}`,
+    input: { file_path: filePath, content },
+  };
+  return {
+    type: "assistant",
+    timestamp: "2026-03-30T14:00:00.000Z",
+    message: {
+      role: "assistant",
+      content: [block],
+      usage: { input_tokens: 100, output_tokens: 50 },
+    },
+    ...overrides,
   };
 }
 

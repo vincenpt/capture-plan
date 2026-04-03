@@ -110,6 +110,12 @@ export function getContentBlocks(entry: TranscriptEntry): ContentBlock[] {
   return content;
 }
 
+/** Check whether a transcript file's raw text contains any of the given substrings. Avoids full JSONL parse. */
+export function transcriptContainsPattern(transcriptPath: string, patterns: string[]): boolean {
+  const raw = readFileSync(transcriptPath, "utf8");
+  return patterns.some((p) => raw.includes(p));
+}
+
 /** Parse a JSONL transcript file into an array of entries, skipping malformed lines. */
 export function parseTranscript(transcriptPath: string): TranscriptEntry[] {
   const raw = readFileSync(transcriptPath, "utf8");
@@ -566,4 +572,58 @@ export function collectToolLog(
     totalToolCalls: seq,
     totalErrors,
   };
+}
+
+const DEFAULT_SPEC_PATTERN = "/superpowers/specs/";
+const DEFAULT_PLAN_PATTERN = "/superpowers/plans/";
+
+/** A Write tool_use targeting a superpowers spec or plan path. */
+export interface SuperpowersWrite {
+  index: number;
+  type: "spec" | "plan";
+  filePath: string;
+  title: string;
+  content: string;
+}
+
+/** Scan transcript for Write tool_use blocks targeting superpowers spec/plan paths. */
+export function findSuperpowersWrites(
+  entries: TranscriptEntry[],
+  specPattern?: string,
+  planPattern?: string,
+): SuperpowersWrite[] {
+  const sp = specPattern || DEFAULT_SPEC_PATTERN;
+  const pp = planPattern || DEFAULT_PLAN_PATTERN;
+  const results: SuperpowersWrite[] = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    for (const block of getContentBlocks(entries[i])) {
+      if (block.type !== "tool_use" || block.name !== "Write") continue;
+      const filePath = block.input?.file_path;
+      if (typeof filePath !== "string") continue;
+
+      let type: "spec" | "plan" | null = null;
+      if (filePath.includes(pp)) type = "plan";
+      else if (filePath.includes(sp)) type = "spec";
+      if (!type) continue;
+
+      const content = typeof block.input?.content === "string" ? block.input.content : "";
+      const titleMatch = content.match(/^#\s+(.+)/m);
+      const title = titleMatch
+        ? titleMatch[1].trim()
+        : (filePath.split("/").pop() ?? "").replace(/\.md$/, "").replace(/^\d{4}-\d{2}-\d{2}-/, "");
+      results.push({ index: i, type, filePath, title, content });
+    }
+  }
+
+  return results;
+}
+
+/** Return the transcript index of the last superpowers Write (planning/execution boundary).
+ *  Prefers plan writes over spec writes. Returns -1 if no writes found. */
+export function findSuperpowersBoundary(writes: SuperpowersWrite[]): number {
+  if (writes.length === 0) return -1;
+  const plans = writes.filter((w) => w.type === "plan");
+  if (plans.length > 0) return plans[plans.length - 1].index;
+  return writes[writes.length - 1].index;
 }

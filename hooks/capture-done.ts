@@ -6,9 +6,12 @@ import { basename, join } from "node:path";
 import {
   appendRowToJournalSection,
   appendToJournal,
+  type Config,
   createVaultNote,
   debugLog,
   deleteVaultState,
+  detectCcVersion,
+  extractTitle,
   findTranscriptPath,
   formatCcVersionYaml,
   formatDuration,
@@ -23,10 +26,17 @@ import {
   loadConfig,
   mergeTags,
   mergeTagsOnDailyNote,
+  nextCounter,
+  padCounter,
   readCcVersion,
   resolveContextCap,
+  type SessionState,
   scanForVaultState,
+  shortSessionId,
+  stripTitleLine,
   summarizeWithClaude,
+  toSlug,
+  writeVaultState,
 } from "./shared.ts";
 import {
   collectExecutionStats,
@@ -34,10 +44,15 @@ import {
   collectTranscriptStats,
   computeDurationMs,
   findExitPlanIndex,
+  findSuperpowersBoundary,
+  findSuperpowersWrites,
   hasExecutionAfter,
   parseTranscript,
+  type SuperpowersWrite,
   selectDoneText,
+  type TranscriptEntry,
   type TranscriptStats,
+  transcriptContainsPattern,
 } from "./transcript.ts";
 
 const DEBUG_LOG = "/tmp/capture-done-debug.log";
@@ -48,6 +63,11 @@ Line 1: A 1-2 sentence summary (max 200 chars). Include concrete outcomes: what 
 Line 2: 1-2 lowercase kebab-case tags (comma-separated, no # prefix).
 Output ONLY these two lines.`;
 
+const PLAN_SYSTEM_PROMPT = `You are a concise note-taking assistant. Given an engineering plan or design spec, output exactly two lines:
+Line 1: A 1-2 sentence summary (max 200 chars). Be specific about what will be built or changed.
+Line 2: 1-2 lowercase kebab-case tags relevant to the plan topic (comma-separated, no # prefix).
+Output ONLY these two lines.`;
+
 interface StopPayload {
   session_id: string;
   hook_event_name?: string;
@@ -55,6 +75,116 @@ interface StopPayload {
   transcript_path?: string;
   last_assistant_message?: string;
   [key: string]: unknown;
+}
+
+/** Build a SessionState on the fly for a superpowers session, creating the plan vault note. */
+async function buildSuperpowersState(
+  sessionId: string,
+  writes: SuperpowersWrite[],
+  entries: TranscriptEntry[],
+  payload: StopPayload,
+  config: Config,
+): Promise<{ state: SessionState; boundaryIdx: number } | null> {
+  // Pick primary: prefer plan over spec
+  const plans = writes.filter((w) => w.type === "plan");
+  const primary = plans.length > 0 ? plans[plans.length - 1] : writes[writes.length - 1];
+  const specs = writes.filter((w) => w.type === "spec");
+
+  const planContent = primary.content;
+  if (!planContent || planContent.length < 20) return null;
+
+  const title = extractTitle(planContent);
+  const slug = toSlug(title);
+  const { dd, mm, yyyy, dateKey, datetime, ampmTime } = getDateParts();
+  const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+
+  const vaultPath = getVaultPath(config.vault);
+  const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null;
+  const counter = dateDirAbsolute ? nextCounter(dateDirAbsolute) : 1;
+
+  const { summary, tags: newTags } = await summarizeWithClaude(planContent, PLAN_SYSTEM_PROMPT);
+  const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`;
+  const planPath = `${planDir}/plan`;
+  const journalPath = getJournalPath(config);
+  const project = getProjectName(payload.cwd);
+  const tagsYaml = formatTagsYaml(newTags);
+
+  // Collect planning-phase stats
+  const boundaryIdx = findSuperpowersBoundary(writes);
+  let planStats: TranscriptStats | null = null;
+  try {
+    if (boundaryIdx >= 0) {
+      planStats = collectTranscriptStats(entries, 0, boundaryIdx);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  const contextCap = resolveContextCap(
+    planStats?.peakTurnContext ?? 0,
+    config.context_cap,
+    sessionId,
+  );
+  const modelYaml = formatModelYaml(planStats, contextCap);
+  const ccVersion = detectCcVersion() ?? readCcVersion(sessionId);
+  const ccVersionYaml = formatCcVersionYaml(ccVersion);
+
+  const noteContent = `---
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
+session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
+source: superpowers${primary.filePath ? `\nspec_file: "${primary.filePath}"` : ""}
+---
+# ${title}
+
+${stripTitleLine(planContent)}
+`;
+
+  const createResult = createVaultNote(planPath, noteContent, config.vault);
+  if (!createResult.success) {
+    debugLog("Failed to create superpowers plan note\n", DEBUG_LOG);
+    return null;
+  }
+
+  // If there's a separate spec, create it as a sibling note
+  if (specs.length > 0 && specs[specs.length - 1] !== primary) {
+    const spec = specs[specs.length - 1];
+    const specTitle = extractTitle(spec.content);
+    const specNoteContent = `---
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}
+plan: "[[${planPath}|${title}]]"
+source: superpowers
+---
+# ${specTitle}
+
+${stripTitleLine(spec.content)}
+`;
+    createVaultNote(`${planDir}/spec`, specNoteContent, config.vault);
+  }
+
+  const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${ampmTime}]] | ${summary} |`;
+  appendToJournal(journalEntry, journalPath, config.vault);
+  mergeTagsOnDailyNote(newTags, journalPath, config.vault);
+
+  const state: SessionState = {
+    session_id: sessionId,
+    plan_slug: slug,
+    plan_title: title,
+    plan_dir: planDir,
+    date_key: dateKey,
+    timestamp: new Date().toISOString(),
+    journal_path: journalPath,
+    project,
+    tags: newTags,
+    model: planStats?.model,
+    cc_version: ccVersion,
+    planStats: planStats ?? undefined,
+    source: "superpowers",
+    spec_path: primary.filePath,
+  };
+
+  writeVaultState(state, config.vault);
+  debugLog(`Superpowers state built: ${title} -> ${planPath}\n`, DEBUG_LOG);
+  return { state, boundaryIdx };
 }
 
 async function main(): Promise<void> {
@@ -73,52 +203,93 @@ async function main(): Promise<void> {
     // Load config early — needed for vault-based state lookup
     const config = await loadConfig(payload.cwd);
 
-    // Gate: scan vault for pending session state (also cleans up stale states)
-    const state = scanForVaultState(sessionId, config);
-    if (!state) {
-      // Most common case — no plan pending for this session
-      process.exit(0);
-    }
-
-    debugLog(`Found state for session ${sessionId}: ${state.plan_title}\n`, DEBUG_LOG);
-
-    // Resolve vault filesystem path (used for state cleanup and journal appends)
-    const vaultPath = getVaultPath(config.vault);
-
-    // Find transcript
+    // Find transcript early — needed for both plan-mode and superpowers paths
     let transcriptPath = payload.transcript_path || null;
     if (!transcriptPath) {
       transcriptPath = findTranscriptPath(sessionId, payload.cwd);
     }
-    if (!transcriptPath) {
-      debugLog("Cannot find transcript, keeping state for retry\n", DEBUG_LOG);
-      process.exit(0);
+
+    // Resolve vault filesystem path (used for state cleanup and journal appends)
+    const vaultPath = getVaultPath(config.vault);
+
+    // Gate: scan vault for pending session state (also cleans up stale states)
+    let state = scanForVaultState(sessionId, config);
+    let boundaryIdx = -1;
+    let entries: TranscriptEntry[] = [];
+    let isSuperpowers = false;
+
+    if (state) {
+      debugLog(`Found state for session ${sessionId}: ${state.plan_title}\n`, DEBUG_LOG);
+
+      if (!transcriptPath) {
+        debugLog("Cannot find transcript, keeping state for retry\n", DEBUG_LOG);
+        process.exit(0);
+      }
+
+      entries = parseTranscript(transcriptPath);
+
+      if (state.source === "superpowers") {
+        // State was written by a prior superpowers capture — find boundary from transcript
+        isSuperpowers = true;
+        const spWrites = findSuperpowersWrites(
+          entries,
+          config.superpowers_spec_pattern,
+          config.superpowers_plan_pattern,
+        );
+        boundaryIdx = findSuperpowersBoundary(spWrites);
+      } else {
+        boundaryIdx = findExitPlanIndex(entries);
+      }
+
+      if (boundaryIdx === -1) {
+        debugLog("No plan boundary found in transcript\n", DEBUG_LOG);
+        if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
+        process.exit(0);
+      }
+    } else {
+      // No state — cheap pre-check before full transcript parse
+      if (!transcriptPath) process.exit(0);
+      const specPat = config.superpowers_spec_pattern || "/superpowers/specs/";
+      const planPat = config.superpowers_plan_pattern || "/superpowers/plans/";
+      if (!transcriptContainsPattern(transcriptPath, [specPat, planPat])) process.exit(0);
+
+      entries = parseTranscript(transcriptPath);
+      const spWrites = findSuperpowersWrites(entries, specPat, planPat);
+      if (spWrites.length === 0) process.exit(0);
+
+      isSuperpowers = true;
+      debugLog(`Superpowers session detected: ${spWrites.length} spec/plan writes\n`, DEBUG_LOG);
+
+      const result = await buildSuperpowersState(sessionId, spWrites, entries, payload, config);
+      if (!result) {
+        debugLog("Failed to build superpowers state\n", DEBUG_LOG);
+        process.exit(0);
+      }
+
+      state = result.state;
+      boundaryIdx = result.boundaryIdx;
     }
 
-    debugLog(`Transcript: ${transcriptPath}\n`, DEBUG_LOG);
-
-    // Parse transcript
-    const entries = parseTranscript(transcriptPath);
-    const exitIdx = findExitPlanIndex(entries);
-    if (exitIdx === -1) {
-      debugLog("No ExitPlanMode in transcript\n", DEBUG_LOG);
+    // Check for execution activity after the planning boundary
+    if (!hasExecutionAfter(entries, boundaryIdx)) {
+      debugLog("No execution tools after plan boundary, waiting for next Stop\n", DEBUG_LOG);
+      if (!isSuperpowers) {
+        // For plan-mode, keep state for retry. For superpowers, state is ephemeral.
+        process.exit(0);
+      }
+      // Superpowers: still capture the plan note even without execution
+      // (state was already created with vault note in buildSuperpowersState)
       if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
       process.exit(0);
     }
 
-    // Check for execution activity after ExitPlanMode
-    if (!hasExecutionAfter(entries, exitIdx)) {
-      debugLog("No execution tools after ExitPlanMode, waiting for next Stop\n", DEBUG_LOG);
-      process.exit(0); // Keep state — plan not yet executed
-    }
-
     // Collect execution stats from transcript
-    const stats = collectExecutionStats(entries, exitIdx);
+    const stats = collectExecutionStats(entries, boundaryIdx);
 
     // Collect detailed transcript stats for the execution phase
     let transcriptStats: TranscriptStats | null = null;
     try {
-      transcriptStats = collectTranscriptStats(entries, exitIdx);
+      transcriptStats = collectTranscriptStats(entries, boundaryIdx);
       debugLog(
         `Execution stats: ${transcriptStats.totalToolCalls} tool calls, model=${transcriptStats.model}\n`,
         DEBUG_LOG,
@@ -257,8 +428,8 @@ ${fileList}
     }
 
     // Create tools-log.md with chronological tool use log
-    const planLog = planStats ? collectToolLog(entries, 0, exitIdx) : null;
-    const execLog = transcriptStats ? collectToolLog(entries, exitIdx) : null;
+    const planLog = planStats ? collectToolLog(entries, 0, boundaryIdx) : null;
+    const execLog = transcriptStats ? collectToolLog(entries, boundaryIdx) : null;
 
     const toolsLogResult = formatToolsLogContent({
       planLog,

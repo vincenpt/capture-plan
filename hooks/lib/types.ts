@@ -9,6 +9,8 @@ export interface Config {
   plan_path: string;
   journal_path: string;
   context_cap?: number;
+  superpowers_spec_pattern?: string;
+  superpowers_plan_pattern?: string;
 }
 
 /** Persisted state that bridges the ExitPlanMode and Stop hooks within a session. */
@@ -25,6 +27,8 @@ export interface SessionState {
   model?: string;
   cc_version?: string;
   planStats?: TranscriptStats;
+  source?: "plan-mode" | "superpowers";
+  spec_path?: string;
 }
 
 /** Parsed YAML frontmatter fields from a plan note. */
