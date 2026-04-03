@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { TranscriptEntry } from "../transcript.ts";
-import { findSkillInvocations } from "../transcript.ts";
+import { findSkillInvocations, transcriptContainsPattern } from "../transcript.ts";
 import { assistantEntry, humanEntry, skillEntry } from "./helpers/transcript-helpers.ts";
 
 describe("findSkillInvocations", () => {
@@ -100,5 +103,64 @@ describe("findSkillInvocations", () => {
     const entries: TranscriptEntry[] = [skillEntry("simplify")];
     const result = findSkillInvocations(entries);
     expect(result[0].contextBefore).toBe("");
+  });
+});
+
+describe("transcriptContainsPattern for skills", () => {
+  it("detects Skill tool_use in raw JSONL", () => {
+    const tempDir = join(tmpdir(), `cp-skill-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    const file = join(tempDir, "test.jsonl");
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "Skill", input: { skill: "simplify" } }],
+      },
+    });
+    writeFileSync(file, line);
+
+    expect(transcriptContainsPattern(file, ['"Skill"'])).toBe(true);
+    Bun.spawnSync(["rm", "-rf", tempDir]);
+  });
+
+  it("returns false when no Skill in transcript", () => {
+    const tempDir = join(tmpdir(), `cp-skill-${Date.now()}`);
+    mkdirSync(tempDir, { recursive: true });
+    const file = join(tempDir, "test.jsonl");
+    const line = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "Edit", input: { file_path: "/tmp/x" } }],
+      },
+    });
+    writeFileSync(file, line);
+
+    expect(transcriptContainsPattern(file, ['"Skill"'])).toBe(false);
+    Bun.spawnSync(["rm", "-rf", tempDir]);
+  });
+});
+
+describe("mixed session handling", () => {
+  it("detects skills in a session that already has plan-mode state", () => {
+    const entries: TranscriptEntry[] = [
+      assistantEntry(), // planning phase
+      assistantEntry({ tools: [{ name: "ExitPlanMode" }] }),
+      humanEntry(),
+      assistantEntry({ tools: [{ name: "Edit" }] }), // execution
+      humanEntry(),
+      skillEntry("simplify"),
+      humanEntry(),
+      assistantEntry({
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Simplified the code." }],
+          usage: { input_tokens: 100, output_tokens: 50 },
+        },
+      }),
+    ];
+
+    const invocations = findSkillInvocations(entries);
+    expect(invocations).toHaveLength(1);
+    expect(invocations[0].skill).toBe("simplify");
   });
 });
