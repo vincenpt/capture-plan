@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  ensureMdExt,
   escapeForObsidianAppend,
   escapeTableCell,
   extractTitle,
@@ -9,6 +10,7 @@ import {
   formatModelLabel,
   formatNumber,
   formatTagsYaml,
+  getDayName,
   getProjectName,
   isCodeLike,
   langFromPath,
@@ -447,5 +449,31 @@ describe("escapeForObsidianAppend", () => {
 
   it("does not escape pipes outside wikilinks", () => {
     expect(escapeForObsidianAppend("a | b")).toBe("a | b");
+  });
+});
+
+// ---- ensureMdExt ----
+
+describe("ensureMdExt", () => {
+  it("appends .md when missing", () => {
+    expect(ensureMdExt("path/to/note")).toBe("path/to/note.md");
+  });
+
+  it("leaves .md paths unchanged", () => {
+    expect(ensureMdExt("path/to/note.md")).toBe("path/to/note.md");
+  });
+});
+
+// ---- getDayName ----
+
+describe("getDayName", () => {
+  it("returns a weekday name for a known date", () => {
+    expect(getDayName(new Date("2026-04-04T12:00:00"))).toBe("Saturday");
+  });
+
+  it("returns a string when called with no argument", () => {
+    const name = getDayName();
+    expect(typeof name).toBe("string");
+    expect(name.length).toBeGreaterThan(0);
   });
 });

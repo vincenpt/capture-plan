@@ -254,3 +254,13 @@ export function formatJournalCallout(
 export function escapeForObsidianAppend(content: string): string {
   return content.replace(/\n/g, "\\n").replace(/\[\[([^\]]*?)\|([^\]]*?)\]\]/g, "[[$1\\|$2]]");
 }
+
+/** Ensure a path ends with `.md`, appending the extension if missing. */
+export function ensureMdExt(path: string): string {
+  return path.endsWith(".md") ? path : `${path}.md`;
+}
+
+/** Return the weekday name (e.g. "Saturday") for a given date, defaulting to today. */
+export function getDayName(date: Date = new Date()): string {
+  return date.toLocaleDateString("en-US", { weekday: "long" });
+}

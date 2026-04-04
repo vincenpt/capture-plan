@@ -6,8 +6,7 @@ import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { DONE_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, SKILL_SYSTEM_PROMPT } from "./lib/prompts.ts";
 import {
-  appendRevisionToCallout,
-  appendToJournal,
+  appendOrCreateCallout,
   type Config,
   createVaultNote,
   debugLog,
@@ -17,7 +16,6 @@ import {
   findTranscriptPath,
   formatCcVersionYaml,
   formatDuration,
-  formatJournalCallout,
   formatJournalRevision,
   formatModelLabel,
   formatModelYaml,
@@ -25,6 +23,7 @@ import {
   formatToolsLogContent,
   formatToolsNoteContent,
   getDateParts,
+  getDayName,
   getJournalPath,
   getPlanDatePath,
   getProjectName,
@@ -173,22 +172,20 @@ ${stripTitleLine(spec.content)}
     summary,
     newTags,
   );
-
-  let spAppended = false;
   const spVaultPath = getVaultPath(config.vault);
-  if (spVaultPath) {
-    const journalFile = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
-    spAppended = await appendRevisionToCallout(title, spRevision, join(spVaultPath, journalFile));
-  }
-  if (!spAppended) {
-    const callout = formatJournalCallout(title, project, "superpowers", spRevision);
-    appendToJournal(`\n\n${callout}`, journalPath, config.vault);
-  }
+  await appendOrCreateCallout(
+    title,
+    spRevision,
+    project,
+    "superpowers",
+    journalPath,
+    spVaultPath,
+    config.vault,
+  );
 
-  const dayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
   updateJournalFrontmatter(
     journalPath,
-    { date: dateKey, day: dayName, project, tags: newTags },
+    { date: dateKey, day: getDayName(), project, tags: newTags },
     config.vault,
   );
 
@@ -348,26 +345,20 @@ ${contextText || "_No context captured_"}
     summary,
     newTags,
   );
-
-  let skillAppended = false;
   const skillVaultPath = getVaultPath(config.vault);
-  if (skillVaultPath) {
-    const journalFile = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
-    skillAppended = await appendRevisionToCallout(
-      title,
-      skillRevision,
-      join(skillVaultPath, journalFile),
-    );
-  }
-  if (!skillAppended) {
-    const callout = formatJournalCallout(title, project, "skill", skillRevision);
-    appendToJournal(`\n\n${callout}`, journalPath, config.vault);
-  }
+  await appendOrCreateCallout(
+    title,
+    skillRevision,
+    project,
+    "skill",
+    journalPath,
+    skillVaultPath,
+    config.vault,
+  );
 
-  const skillDayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
   updateJournalFrontmatter(
     journalPath,
-    { date: dateKey, day: skillDayName, project, tags: newTags },
+    { date: dateKey, day: getDayName(), project, tags: newTags },
     config.vault,
   );
 
@@ -772,29 +763,21 @@ ${contextText || "_No context captured_"}
       summary,
       newTags,
     );
-    let appended = false;
     const journalToModify = state.journal_path || journalPath;
+    await appendOrCreateCallout(
+      state.plan_title,
+      doneRevision,
+      project,
+      state.source || "plan-mode",
+      journalToModify,
+      vaultPath,
+      config.vault,
+      journalPath,
+    );
 
-    if (vaultPath) {
-      const journalFile = journalToModify.endsWith(".md")
-        ? journalToModify
-        : `${journalToModify}.md`;
-      const fullJournalPath = join(vaultPath, journalFile);
-      appended = await appendRevisionToCallout(state.plan_title, doneRevision, fullJournalPath);
-      debugLog(`appendRevisionToCallout: ${appended}\n`, DEBUG_LOG);
-    }
-
-    if (!appended) {
-      // Fallback: create a new callout (different day, missing file, etc.)
-      const source = state.source || "plan-mode";
-      const fallbackCallout = formatJournalCallout(state.plan_title, project, source, doneRevision);
-      appendToJournal(`\n\n${fallbackCallout}`, journalPath, config.vault);
-    }
-
-    const doneDayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
     updateJournalFrontmatter(
       journalPath,
-      { date: state.date_key, day: doneDayName, project, tags: newTags },
+      { date: state.date_key, day: getDayName(), project, tags: newTags },
       config.vault,
     );
 

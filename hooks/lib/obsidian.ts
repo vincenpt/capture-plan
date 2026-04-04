@@ -1,7 +1,9 @@
 // obsidian.ts — Obsidian CLI & vault operations
 
+import { join } from "node:path";
 import { type DateParts, formatDatePath, getDatePartsFor } from "./dates.ts";
-import { escapeForObsidianAppend, mergeTags } from "./text.ts";
+import { appendRevisionToCallout } from "./session-state.ts";
+import { ensureMdExt, escapeForObsidianAppend, formatJournalCallout, mergeTags } from "./text.ts";
 import type { Config } from "./types.ts";
 
 /** Execute the Obsidian CLI with the given arguments, optionally scoped to a vault. */
@@ -55,7 +57,7 @@ export function getVaultPath(vault?: string): string | null {
 /** Read existing tags from a daily note and merge in new ones, deduplicating. */
 export function mergeTagsOnDailyNote(newTags: string, journalPath: string, vault?: string): void {
   if (!journalPath) return;
-  const pathWithExt = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
+  const pathWithExt = ensureMdExt(journalPath);
   const tagsResult = runObsidian(["property:read", `name=tags`, `path=${pathWithExt}`], vault);
   const existingTags = tagsResult.stdout
     .split("\n")
@@ -86,7 +88,7 @@ export function getJournalPath(config: Config): string {
 
 /** Append content to a journal note, creating the note first if it doesn't exist. Content is escaped for the Obsidian CLI automatically. */
 export function appendToJournal(content: string, journalPath: string, vault?: string): void {
-  const pathWithExt = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
+  const pathWithExt = ensureMdExt(journalPath);
   const escaped = escapeForObsidianAppend(content);
   const result = runObsidian(["append", `path=${pathWithExt}`, `content=${escaped}`], vault);
   if (result.exitCode !== 0) {
@@ -111,7 +113,7 @@ export function updateJournalFrontmatter(
   vault?: string,
 ): void {
   if (!journalPath) return;
-  const pathWithExt = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
+  const pathWithExt = ensureMdExt(journalPath);
 
   // date and day: idempotent set
   runObsidian(
@@ -157,4 +159,26 @@ export function updateJournalFrontmatter(
 
   // tags: delegate to existing mergeTagsOnDailyNote
   mergeTagsOnDailyNote(props.tags, journalPath, vault);
+}
+
+/** Try to append a revision to an existing callout in the journal; if the callout doesn't exist, create a new one via the Obsidian CLI. When `fallbackJournalPath` is provided, the fallback write targets that path instead of `journalPath` (used when the append target is a prior day's journal). */
+export async function appendOrCreateCallout(
+  title: string,
+  revision: string,
+  project: string,
+  source: string,
+  journalPath: string,
+  vaultPath: string | null,
+  vault?: string,
+  fallbackJournalPath?: string,
+): Promise<void> {
+  let appended = false;
+  if (vaultPath) {
+    const fullJournalPath = join(vaultPath, ensureMdExt(journalPath));
+    appended = await appendRevisionToCallout(title, revision, fullJournalPath);
+  }
+  if (!appended) {
+    const callout = formatJournalCallout(title, project, source, revision);
+    appendToJournal(`\n\n${callout}`, fallbackJournalPath ?? journalPath, vault);
+  }
 }

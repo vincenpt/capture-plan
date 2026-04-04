@@ -2,23 +2,21 @@
 // capture-plan.ts — Claude Code Hook for ExitPlanMode
 // Captures plans and persists them to Obsidian vault
 
-import { join } from "node:path";
 import { PLAN_SYSTEM_PROMPT } from "./lib/prompts.ts";
 import {
-  appendRevisionToCallout,
-  appendToJournal,
+  appendOrCreateCallout,
   createVaultNote,
   debugLog,
   detectCcVersion,
   extractTitle,
   findTranscriptPath,
   formatCcVersionYaml,
-  formatJournalCallout,
   formatJournalRevision,
   formatModelLabel,
   formatModelYaml,
   formatTagsYaml,
   getDateParts,
+  getDayName,
   getJournalPath,
   getPlanDatePath,
   getProjectName,
@@ -213,25 +211,19 @@ ${stripTitleLine(planContent)}
       summary,
       newTags,
     );
+    await appendOrCreateCallout(
+      title,
+      revision,
+      project,
+      "plan-mode",
+      journalPath,
+      vaultPath,
+      config.vault,
+    );
 
-    let appended = false;
-    if (vaultPath) {
-      const journalFile = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
-      const fullJournalPath = join(vaultPath, journalFile);
-      appended = await appendRevisionToCallout(title, revision, fullJournalPath);
-      debugLog(`appendRevisionToCallout: ${appended}\n`, DEBUG_LOG);
-    }
-
-    if (!appended) {
-      const callout = formatJournalCallout(title, project, "plan-mode", revision);
-      appendToJournal(`\n\n${callout}`, journalPath, config.vault);
-    }
-
-    // Update journal frontmatter (date, day, plans count, projects, tags)
-    const dayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
     updateJournalFrontmatter(
       journalPath,
-      { date: dateKey, day: dayName, project, tags: newTags },
+      { date: dateKey, day: getDayName(), project, tags: newTags },
       config.vault,
     );
 

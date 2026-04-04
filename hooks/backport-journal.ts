@@ -6,16 +6,15 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  appendRevisionToCallout,
-  appendToJournal,
+  appendOrCreateCallout,
   type Config,
   createVaultNote,
   extractTitle,
   FLAT_DATE_PATTERN,
-  formatJournalCallout,
   formatJournalRevision,
   formatTagsYaml,
   getDatePartsFor,
+  getDayName,
   getJournalPathForDate,
   getPlanDatePath,
   getProjectLabel,
@@ -348,23 +347,19 @@ ${stripTitleLine(content)}
 
       if (!options.dryRun) {
         createVaultNote(planPath, noteContent, config.vault);
+        await appendOrCreateCallout(
+          title,
+          revision,
+          project,
+          "plan-mode",
+          journalPath,
+          vaultPath,
+          config.vault,
+        );
 
-        // Try to append to existing callout, otherwise create a new one
-        let bpAppended = false;
-        if (vaultPath) {
-          const journalFile = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
-          bpAppended = await appendRevisionToCallout(title, revision, join(vaultPath, journalFile));
-        }
-        if (!bpAppended) {
-          const callout = formatJournalCallout(title, project, "plan-mode", revision);
-          appendToJournal(`\n\n${callout}`, journalPath, config.vault);
-        }
-
-        const bpDate = new Date(`${plan.date}T12:00:00`);
-        const bpDayName = bpDate.toLocaleDateString("en-US", { weekday: "long" });
         updateJournalFrontmatter(
           journalPath,
-          { date: plan.date, day: bpDayName, project, tags },
+          { date: plan.date, day: getDayName(new Date(`${plan.date}T12:00:00`)), project, tags },
           config.vault,
         );
       }
