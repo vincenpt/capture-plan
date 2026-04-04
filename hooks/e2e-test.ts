@@ -144,6 +144,65 @@ function buildTranscript(_sessionId: string, planContent: string): string {
         ],
       },
     },
+    // AskUserQuestion — planning phase
+    {
+      type: "assistant",
+      timestamp: ts(260_000),
+      model: "claude-sonnet-4-20250514",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Before finalizing the plan, I have a question about the approach.",
+          },
+          {
+            type: "tool_use",
+            name: "AskUserQuestion",
+            id: "tu_ask_1",
+            input: {
+              questions: [
+                {
+                  question: "Which component pattern should we use for the widget?",
+                  header: "Pattern",
+                  options: [
+                    {
+                      label: "Functional (Recommended)",
+                      description: "Stateless functional component with hooks",
+                    },
+                    {
+                      label: "Class-based",
+                      description: "Traditional class component with lifecycle methods",
+                    },
+                  ],
+                  multiSelect: false,
+                },
+              ],
+            },
+          },
+        ],
+        usage: {
+          input_tokens: 1600,
+          output_tokens: 250,
+          cache_read_input_tokens: 1100,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    },
+    {
+      type: "human",
+      timestamp: ts(255_000),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_ask_1",
+            content: "Functional (Recommended)",
+          },
+        ],
+      },
+    },
     {
       type: "assistant",
       timestamp: ts(250_000),
@@ -215,6 +274,65 @@ function buildTranscript(_sessionId: string, planContent: string): string {
         role: "user",
         content: [
           { type: "tool_result", tool_use_id: "tu_edit_1", content: "File edited successfully." },
+        ],
+      },
+    },
+    // AskUserQuestion — execution phase
+    {
+      type: "assistant",
+      timestamp: ts(193_000),
+      model: "claude-sonnet-4-20250514",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            name: "AskUserQuestion",
+            id: "tu_ask_2",
+            input: {
+              questions: [
+                {
+                  question: "What level of test coverage do you want for the widget?",
+                  header: "Testing",
+                  options: [
+                    {
+                      label: "Unit tests only",
+                      description: "Fast isolated tests for core logic",
+                    },
+                    {
+                      label: "Unit + integration",
+                      description: "Add integration tests with dependencies",
+                    },
+                    {
+                      label: "Full coverage",
+                      description: "Unit, integration, and snapshot tests",
+                    },
+                  ],
+                  multiSelect: false,
+                },
+              ],
+            },
+          },
+        ],
+        usage: {
+          input_tokens: 2600,
+          output_tokens: 200,
+          cache_read_input_tokens: 1600,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    },
+    {
+      type: "human",
+      timestamp: ts(191_000),
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tu_ask_2",
+            content: "Unit + integration",
+          },
         ],
       },
     },
