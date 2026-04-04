@@ -24,8 +24,8 @@ let projectsDir: string;
 
 const TEST_CONFIG: Config = {
   vault: "TestVault",
-  plan_path: "Claude/Plans",
-  journal_path: "Journal",
+  plan: { path: "Claude/Plans", date_scheme: "calendar" },
+  journal: { path: "Journal", date_scheme: "calendar" },
 };
 
 function makePlanFile(slug: string, content: string): string {
@@ -266,7 +266,7 @@ describe("discoverPlans", () => {
   it("discovers .md files from plans dir", () => {
     makePlanFile("fuzzy-llama", "# My Cool Plan\n\nDo stuff.");
 
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    const plans = discoverPlans(vaultPath, "Claude/Plans");
     expect(plans).toHaveLength(1);
     expect(plans[0].sourceSlug).toBe("fuzzy-llama");
     expect(plans[0].title).toBe("My Cool Plan");
@@ -277,7 +277,7 @@ describe("discoverPlans", () => {
     makePlanFile("fuzzy-llama", "# Main Plan\n\nContent.");
     makePlanFile("fuzzy-llama-agent-abc123def", "# Agent Sub-Plan\n\nSub content.");
 
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    const plans = discoverPlans(vaultPath, "Claude/Plans");
     expect(plans).toHaveLength(1);
     expect(plans[0].sourceSlug).toBe("fuzzy-llama");
   });
@@ -288,7 +288,7 @@ describe("discoverPlans", () => {
       { slug: "fuzzy-llama", cwd: "/Users/k/src/myproject" },
     ]);
 
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    const plans = discoverPlans(vaultPath, "Claude/Plans");
     expect(plans[0].projectCwd).toBe("/Users/k/src/myproject");
     expect(plans[0].projectLabel).toBe("src/myproject");
   });
@@ -304,12 +304,12 @@ describe("discoverPlans", () => {
       sourceSlug: "fuzzy-llama",
     });
 
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    const plans = discoverPlans(vaultPath, "Claude/Plans");
     expect(plans[0].isImported).toBe(true);
   });
 
   it("returns empty for empty plans dir", () => {
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    const plans = discoverPlans(vaultPath, "Claude/Plans");
     expect(plans).toEqual([]);
   });
 
@@ -318,7 +318,7 @@ describe("discoverPlans", () => {
     writeFileSync(join(plansDir, "data.json"), "{}");
     makePlanFile("real-plan", "# Real Plan\n\nContent.");
 
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    const plans = discoverPlans(vaultPath, "Claude/Plans");
     expect(plans).toHaveLength(1);
     expect(plans[0].sourceSlug).toBe("real-plan");
   });
@@ -328,7 +328,7 @@ describe("discoverPlans", () => {
     makePlanFile("aaa-first", "# AAA First\n\nContent.");
     makePlanFile("zzz-second", "# ZZZ Second\n\nContent.");
 
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    const plans = discoverPlans(vaultPath, "Claude/Plans");
     expect(plans).toHaveLength(2);
     // Same date (created at almost the same time), sorted by slug
     expect(plans[0].sourceSlug).toBe("aaa-first");
@@ -338,7 +338,7 @@ describe("discoverPlans", () => {
   it("sets projectLabel to 'unknown' when no session match", () => {
     makePlanFile("orphan-plan", "# Orphan\n\nNo session.");
 
-    const plans = discoverPlans(vaultPath, "Claude/Plans", TEST_CONFIG);
+    const plans = discoverPlans(vaultPath, "Claude/Plans");
     expect(plans[0].projectLabel).toBe("unknown");
     expect(plans[0].projectCwd).toBe("");
   });

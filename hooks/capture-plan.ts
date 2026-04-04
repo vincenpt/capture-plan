@@ -16,6 +16,7 @@ import {
   formatTagsYaml,
   getDateParts,
   getJournalPath,
+  getPlanDatePath,
   getProjectName,
   getVaultPath,
   loadConfig,
@@ -129,10 +130,11 @@ async function main(): Promise<void> {
     const { content: planContent, source: planSource, file: planFile } = extraction;
     const title = extractTitle(planContent);
     const slug = toSlug(title);
-    const { dd, mm, yyyy, dateKey, datetime, ampmTime } = getDateParts();
+    const dateParts = getDateParts();
+    const { dateKey, datetime, ampmTime } = dateParts;
 
     const config = await loadConfig(payload.cwd);
-    const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+    const dateDirRelative = getPlanDatePath(config, dateParts);
 
     debugLog(
       `HOOK=${hookEvent} SRC=${planSource} FILE=${planFile} TITLE=${title} SLUG=${slug} DATE_DIR=${dateDirRelative}\n`,

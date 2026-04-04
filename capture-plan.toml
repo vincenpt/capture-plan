@@ -3,12 +3,15 @@
 # Obsidian vault name (run `obsidian vaults` to list available vaults)
 vault = "Personal"
 
-# Base path for plan notes inside the vault
-# Structure: <plan_path>/<yyyy>/<mm-dd>/<counter>-<slug>/{plan,summary}.md
-plan_path = "Claude/Plans"
+# Plan notes configuration
+[plan]
+path = "Claude/Plans"
+date_scheme = "calendar"   # calendar | compact | monthly | flat
 
-# Base path for journal entries inside the vault
-journal_path = "Journal"
+# Journal entries configuration
+[journal]
+path = "Journal"
+date_scheme = "calendar"   # calendar | compact | monthly | flat
 
 # Context window cap in tokens (auto-detected, override if needed)
 # Standard: 200000, Max/Enterprise: 1000000

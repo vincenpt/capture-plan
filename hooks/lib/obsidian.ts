@@ -1,6 +1,6 @@
 // obsidian.ts — Obsidian CLI & vault operations
 
-import { getDatePartsFor } from "./dates.ts";
+import { type DateParts, formatDatePath, getDatePartsFor } from "./dates.ts";
 import { mergeTags } from "./text.ts";
 import type { Config } from "./types.ts";
 
@@ -68,10 +68,15 @@ export function mergeTagsOnDailyNote(newTags: string, journalPath: string, vault
   );
 }
 
+/** Build the date directory path for plans using the configured scheme. */
+export function getPlanDatePath(config: Config, dateParts: DateParts): string {
+  return `${config.plan.path}/${formatDatePath(config.plan.date_scheme, dateParts)}`;
+}
+
 /** Build the Obsidian vault path for the daily journal note on a given date. */
 export function getJournalPathForDate(config: Config, date: Date): string {
-  const { dd, mm, yyyy, monthName, dayName } = getDatePartsFor(date);
-  return `${config.journal_path}/${yyyy}/${mm}-${monthName}/${dd}-${dayName}`;
+  const parts = getDatePartsFor(date);
+  return `${config.journal.path}/${formatDatePath(config.journal.date_scheme, parts)}`;
 }
 
 /** Build the Obsidian vault path for today's daily journal note. */

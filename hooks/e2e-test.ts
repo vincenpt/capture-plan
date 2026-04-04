@@ -19,6 +19,7 @@ import {
   createVaultNote,
   getDateParts,
   getJournalPath,
+  getPlanDatePath,
   getVaultPath,
   loadConfig,
   nextCounter,
@@ -427,7 +428,7 @@ function buildTranscript(_sessionId: string, planContent: string): string {
     },
   ];
 
-  return entries.map((e) => JSON.stringify(e)).join("\n") + "\n";
+  return `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`;
 }
 
 // ---- Hook Runner ----
@@ -556,7 +557,7 @@ async function main(): Promise<void> {
     "preflight",
     "config loaded",
     true,
-    `plan_path=${config.plan_path}, journal_path=${config.journal_path}`,
+    `plan=${config.plan.path} (${config.plan.date_scheme}), journal=${config.journal.path} (${config.journal.date_scheme})`,
   );
 
   // Check vault
@@ -575,8 +576,9 @@ async function main(): Promise<void> {
 
   // Generate IDs and paths
   const sessionId = crypto.randomUUID();
-  const { dd, mm, yyyy, datetime } = getDateParts();
-  const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+  const dateParts = getDateParts();
+  const { datetime } = dateParts;
+  const dateDirRelative = getPlanDatePath(config, dateParts);
   const dateDirAbsolute = join(vaultPath, dateDirRelative);
   const counter = nextCounter(dateDirAbsolute);
   const slug = toSlug(PLAN_TITLE);

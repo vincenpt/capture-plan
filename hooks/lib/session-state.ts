@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { TranscriptStats } from "../transcript.ts";
-import { getDatePartsFor } from "./dates.ts";
+import { formatDatePath, getDatePartsFor } from "./dates.ts";
 import { createVaultNote, getVaultPath } from "./obsidian.ts";
 import type { Config, PlanFrontmatter, SessionState } from "./types.ts";
 
@@ -92,19 +92,19 @@ export function scanForVaultState(sessionId: string, config: Config): SessionSta
   const vaultPath = getVaultPath(config.vault);
   if (!vaultPath) return null;
 
-  const planRoot = join(vaultPath, config.plan_path);
+  const planRoot = join(vaultPath, config.plan.path);
   let match: SessionState | null = null;
 
   // State files expire in 2h, so only scan today + yesterday (covers midnight crossover)
   const today = new Date();
   const yesterday = new Date(today.getTime() - 86_400_000);
-  const recentDirs = [today, yesterday].map((d) => {
+  const recentDatePaths = [today, yesterday].map((d) => {
     const parts = getDatePartsFor(d);
-    return { year: parts.yyyy, date: `${parts.mm}-${parts.dd}` };
+    return formatDatePath(config.plan.date_scheme, parts);
   });
 
-  for (const { year, date } of recentDirs) {
-    const datePath = join(planRoot, year, date);
+  for (const dateSeg of recentDatePaths) {
+    const datePath = join(planRoot, dateSeg);
     try {
       for (const planDir of readdirSync(datePath, { withFileTypes: true })) {
         if (!planDir.isDirectory()) continue;

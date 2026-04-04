@@ -28,8 +28,12 @@ No build step — Bun runs TypeScript natively.
 
 ### Hook Data Flow
 
-1. `capture-plan.ts` receives the ExitPlanMode payload via stdin JSON, extracts plan content, creates an Obsidian note at `<vault>/<plan_path>/<yyyy>/<mm-dd>/<counter>-<slug>/plan.md`
+1. `capture-plan.ts` receives the ExitPlanMode payload via stdin JSON, extracts plan content, creates an Obsidian note at `<vault>/<plan.path>/<date_scheme_path>/<counter>-<slug>/plan.md`
 2. `capture-done.ts` receives the Stop payload via stdin JSON, reads saved session state, finds and parses the transcript, and writes `summary.md` in the same directory
+
+### Date Directory Schemes
+
+The `date_scheme` setting controls how date segments are formatted in vault paths. Four named schemes are available: `calendar` (default), `compact`, `monthly`, `flat`. Each path (plan and journal) can be configured independently via TOML grouped tables.
 
 ### Config Cascade (highest priority wins)
 
@@ -37,9 +41,11 @@ No build step — Bun runs TypeScript natively.
 2. User global: `~/.config/capture-plan/config.toml`
 3. Plugin default: `capture-plan.toml` (repo root)
 
+Old flat keys (`plan_path`, `journal_path`) are still accepted for backward compatibility; new `[plan]`/`[journal]` tables take precedence.
+
 ### Session State
 
-`<vault>/<plan_path>/<yyyy>/<mm-dd>/<counter>-<slug>/state.md` bridges the two hooks — written by capture-plan, read by capture-done.
+`<vault>/<plan.path>/<date_scheme_path>/<counter>-<slug>/state.md` bridges the two hooks — written by capture-plan, read by capture-done.
 
 ### Troubleshooting
 

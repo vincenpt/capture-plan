@@ -3,14 +3,20 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { DATE_SCHEMES, type DateScheme } from "./dates.ts";
 import { type Config, type ContextHintResult, PLUGIN_ROOT } from "./types.ts";
 
 const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.toml");
 const USER_GLOBAL_CONFIG = join(homedir(), ".config", "capture-plan", "config.toml");
 
-const DEFAULT_CONFIG: Config = {
-  plan_path: "Claude/Plans",
-  journal_path: "Journal",
+const DEFAULT_PLAN_PATH = "Claude/Plans";
+const DEFAULT_JOURNAL_PATH = "Journal";
+const DEFAULT_DATE_SCHEME: DateScheme = "calendar";
+
+/** Default plugin configuration for reference and testing. */
+export const DEFAULT_CONFIG: Config = {
+  plan: { path: DEFAULT_PLAN_PATH, date_scheme: DEFAULT_DATE_SCHEME },
+  journal: { path: DEFAULT_JOURNAL_PATH, date_scheme: DEFAULT_DATE_SCHEME },
 };
 
 async function loadToml(path: string): Promise<Record<string, unknown> | null> {
@@ -22,6 +28,14 @@ async function loadToml(path: string): Promise<Record<string, unknown> | null> {
   }
 }
 
+/** Validate and return a DateScheme, falling back to the default if invalid. */
+function resolveScheme(raw: unknown): DateScheme {
+  if (typeof raw === "string" && (DATE_SCHEMES as readonly string[]).includes(raw)) {
+    return raw as DateScheme;
+  }
+  return DEFAULT_DATE_SCHEME;
+}
+
 /** Load plugin configuration by merging the 3-layer TOML cascade (plugin default, user global, project local). */
 export async function loadConfig(cwd?: string): Promise<Config> {
   const pluginDefault = await loadToml(PLUGIN_DEFAULT_CONFIG);
@@ -31,10 +45,23 @@ export async function loadConfig(cwd?: string): Promise<Config> {
   const merged = { ...pluginDefault, ...userGlobal, ...project };
   const rawCap = merged.context_cap;
   const contextCap = typeof rawCap === "number" && rawCap > 0 ? rawCap : undefined;
+
+  // Resolve plan config: grouped [plan] table takes precedence over flat plan_path key
+  const mergedPlan = merged.plan as Record<string, unknown> | undefined;
+  const planPath =
+    (mergedPlan?.path as string) || (merged.plan_path as string) || DEFAULT_PLAN_PATH;
+  const planScheme = resolveScheme(mergedPlan?.date_scheme);
+
+  // Resolve journal config: grouped [journal] table takes precedence over flat journal_path key
+  const mergedJournal = merged.journal as Record<string, unknown> | undefined;
+  const journalPath =
+    (mergedJournal?.path as string) || (merged.journal_path as string) || DEFAULT_JOURNAL_PATH;
+  const journalScheme = resolveScheme(mergedJournal?.date_scheme);
+
   return {
     vault: (merged.vault as string) || undefined,
-    plan_path: (merged.plan_path as string) || DEFAULT_CONFIG.plan_path,
-    journal_path: (merged.journal_path as string) || DEFAULT_CONFIG.journal_path,
+    plan: { path: planPath, date_scheme: planScheme },
+    journal: { path: journalPath, date_scheme: journalScheme },
     context_cap: contextCap,
     superpowers_spec_pattern: (merged.superpowers_spec_pattern as string) || undefined,
     superpowers_plan_pattern: (merged.superpowers_plan_pattern as string) || undefined,

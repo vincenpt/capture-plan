@@ -23,6 +23,7 @@ import {
   formatToolsNoteContent,
   getDateParts,
   getJournalPath,
+  getPlanDatePath,
   getProjectName,
   getVaultPath,
   loadConfig,
@@ -89,8 +90,9 @@ async function buildSuperpowersState(
 
   const title = extractTitle(planContent);
   const slug = toSlug(title);
-  const { dd, mm, yyyy, dateKey, datetime, ampmTime } = getDateParts();
-  const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+  const dateParts = getDateParts();
+  const { dateKey, datetime, ampmTime } = dateParts;
+  const dateDirRelative = getPlanDatePath(config, dateParts);
 
   const vaultPath = getVaultPath(config.vault);
   const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null;
@@ -212,8 +214,9 @@ async function buildSkillState(
   const rawTitle = extractTitle(summary) || `${invocations[0].skill} session`;
   const title = rawTitle.length > 80 ? `${rawTitle.slice(0, 77)}...` : rawTitle;
   const slug = toSlug(title);
-  const { dd, mm, yyyy, dateKey, datetime, ampmTime } = getDateParts();
-  const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+  const dateParts = getDateParts();
+  const { dateKey, datetime, ampmTime } = dateParts;
+  const dateDirRelative = getPlanDatePath(config, dateParts);
 
   const vaultPath = getVaultPath(config.vault);
   const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null;
