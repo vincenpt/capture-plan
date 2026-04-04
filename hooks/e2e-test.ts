@@ -428,7 +428,7 @@ function buildTranscript(_sessionId: string, planContent: string): string {
     },
   ];
 
-  return entries.map((e) => JSON.stringify(e)).join("\n") + "\n";
+  return `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`;
 }
 
 // ---- Hook Runner ----
