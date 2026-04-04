@@ -135,7 +135,10 @@ ${stripTitleLine(planContent)}
 
   const createResult = createVaultNote(planPath, noteContent, config.vault);
   if (!createResult.success) {
-    debugLog("Failed to create superpowers plan note\n", DEBUG_LOG);
+    debugLog(
+      `Failed to create superpowers plan note: stdout=${createResult.stdout} stderr=${createResult.stderr}\n`,
+      DEBUG_LOG,
+    );
     return null;
   }
 
@@ -297,7 +300,10 @@ ${contextText || "_No context captured_"}
 
   const createResult = createVaultNote(activityPath, noteContent, config.vault);
   if (!createResult.success) {
-    debugLog("Failed to create skill activity note\n", DEBUG_LOG);
+    debugLog(
+      `Failed to create skill activity note: stdout=${createResult.stdout} stderr=${createResult.stderr}\n`,
+      DEBUG_LOG,
+    );
     return null;
   }
 
@@ -578,7 +584,10 @@ ${fileList}
 
     const createResult = createVaultNote(summaryPath, noteContent, config.vault);
     if (!createResult.success) {
-      debugLog("Failed to create summary note\n", DEBUG_LOG);
+      debugLog(
+        `Failed to create summary note: stdout=${createResult.stdout} stderr=${createResult.stderr}\n`,
+        DEBUG_LOG,
+      );
       if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
       process.exit(0);
     }
@@ -612,7 +621,10 @@ ${contextText || "_No context captured_"}
 `;
           const skillResult = createVaultNote(skillNotePath, skillNoteContent, config.vault);
           if (!skillResult.success) {
-            debugLog(`Failed to create skill note: ${skillNotePath}\n`, DEBUG_LOG);
+            debugLog(
+              `Failed to create skill note: ${skillNotePath} stdout=${skillResult.stdout} stderr=${skillResult.stderr}\n`,
+              DEBUG_LOG,
+            );
           } else {
             debugLog(`Skill note captured -> ${skillNotePath}.md\n`, DEBUG_LOG);
           }
@@ -638,7 +650,10 @@ ${contextText || "_No context captured_"}
       const toolsNotePath = `${state.plan_dir}/tools-stats`;
       const toolsResult = createVaultNote(toolsNotePath, toolsNoteContent, config.vault);
       if (!toolsResult.success) {
-        debugLog("Failed to create tools-stats note\n", DEBUG_LOG);
+        debugLog(
+          `Failed to create tools-stats note: stdout=${toolsResult.stdout} stderr=${toolsResult.stderr}\n`,
+          DEBUG_LOG,
+        );
       } else {
         debugLog(`Tools stats captured -> ${toolsNotePath}.md\n`, DEBUG_LOG);
       }
@@ -666,7 +681,10 @@ ${contextText || "_No context captured_"}
       for (const agentFile of toolsLogResult.agentFiles) {
         const result = createVaultNote(agentFile.path, agentFile.content, config.vault);
         if (!result.success) {
-          debugLog(`Failed to create agent file: ${agentFile.path}\n`, DEBUG_LOG);
+          debugLog(
+            `Failed to create agent file: ${agentFile.path} stdout=${result.stdout} stderr=${result.stderr}\n`,
+            DEBUG_LOG,
+          );
         } else {
           debugLog(`Agent prompt captured -> ${agentFile.path}.md\n`, DEBUG_LOG);
         }
@@ -676,7 +694,10 @@ ${contextText || "_No context captured_"}
       const toolsLogPath = `${state.plan_dir}/tools-log`;
       const logResult = createVaultNote(toolsLogPath, toolsLogResult.markdown, config.vault);
       if (!logResult.success) {
-        debugLog("Failed to create tools-log note\n", DEBUG_LOG);
+        debugLog(
+          `Failed to create tools-log note: stdout=${logResult.stdout} stderr=${logResult.stderr}\n`,
+          DEBUG_LOG,
+        );
       } else {
         debugLog(`Tools log captured -> ${toolsLogPath}.md\n`, DEBUG_LOG);
       }

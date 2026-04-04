@@ -5,16 +5,20 @@ import { mergeTags } from "./text.ts";
 import type { Config } from "./types.ts";
 
 /** Execute the Obsidian CLI with the given arguments, optionally scoped to a vault. */
-export function runObsidian(args: string[], vault?: string): { stdout: string; exitCode: number } {
+export function runObsidian(
+  args: string[],
+  vault?: string,
+): { stdout: string; stderr: string; exitCode: number } {
   try {
     const cmd = vault ? ["obsidian", `vault=${vault}`, ...args] : ["obsidian", ...args];
     const result = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe" });
     const stdout = result.stdout.toString().trim();
+    const stderr = result.stderr.toString().trim();
     // Obsidian CLI returns exitCode 0 even on errors — detect via stdout
     const exitCode = result.exitCode !== 0 || stdout.startsWith("Error:") ? 1 : 0;
-    return { stdout, exitCode };
+    return { stdout, stderr, exitCode };
   } catch {
-    return { stdout: "", exitCode: 1 };
+    return { stdout: "", stderr: "", exitCode: 1 };
   }
 }
 
@@ -23,10 +27,15 @@ export function createVaultNote(
   path: string,
   content: string,
   vault?: string,
-): { success: boolean; exitCode: number } {
+): { success: boolean; exitCode: number; stdout: string; stderr: string } {
   const escaped = content.replace(/\n/g, "\\n");
   const result = runObsidian(["create", `path=${path}`, `content=${escaped}`, "silent"], vault);
-  return { success: result.exitCode === 0, exitCode: result.exitCode };
+  return {
+    success: result.exitCode === 0,
+    exitCode: result.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
 }
 
 /** Resolve the absolute filesystem path of an Obsidian vault via the CLI. */

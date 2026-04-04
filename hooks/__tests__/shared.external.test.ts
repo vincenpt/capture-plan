@@ -45,7 +45,7 @@ describe("runObsidian", () => {
     spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({ stdout: "ok" }));
 
     const result = runObsidian(["create", "path=test"]);
-    expect(result).toEqual({ stdout: "ok", exitCode: 0 });
+    expect(result).toEqual({ stdout: "ok", stderr: "", exitCode: 0 });
     expect(spawnSyncSpy).toHaveBeenCalledWith(["obsidian", "create", "path=test"], {
       stdout: "pipe",
       stderr: "pipe",
@@ -56,7 +56,7 @@ describe("runObsidian", () => {
     spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({ stdout: "ok" }));
 
     const result = runObsidian(["create", "path=test"], "MyVault");
-    expect(result).toEqual({ stdout: "ok", exitCode: 0 });
+    expect(result).toEqual({ stdout: "ok", stderr: "", exitCode: 0 });
     expect(spawnSyncSpy).toHaveBeenCalledWith(
       ["obsidian", "vault=MyVault", "create", "path=test"],
       { stdout: "pipe", stderr: "pipe" },
@@ -82,6 +82,16 @@ describe("runObsidian", () => {
     expect(result.stdout).toBe('Error: File "test.md" not found.');
   });
 
+  it("captures stderr from the CLI", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: "", stderr: "vault not configured", exitCode: 1 }),
+    );
+
+    const result = runObsidian(["create", "path=test"]);
+    expect(result.stderr).toBe("vault not configured");
+    expect(result.exitCode).toBe(1);
+  });
+
   it("preserves original non-zero exitCode", () => {
     spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
       spawnSyncResult({ exitCode: 2, success: false }),
@@ -97,7 +107,7 @@ describe("runObsidian", () => {
     });
 
     const result = runObsidian(["test"]);
-    expect(result).toEqual({ stdout: "", exitCode: 1 });
+    expect(result).toEqual({ stdout: "", stderr: "", exitCode: 1 });
   });
 });
 
@@ -114,7 +124,7 @@ describe("createVaultNote", () => {
     spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({ stdout: "ok" }));
 
     const result = createVaultNote("path/to/note", "line1\nline2\nline3", "MyVault");
-    expect(result).toEqual({ success: true, exitCode: 0 });
+    expect(result).toEqual({ success: true, exitCode: 0, stdout: "ok", stderr: "" });
     expect(spawnSyncSpy).toHaveBeenCalledWith(
       [
         "obsidian",
@@ -134,7 +144,12 @@ describe("createVaultNote", () => {
     );
 
     const result = createVaultNote("path/to/note", "content");
-    expect(result).toEqual({ success: false, exitCode: 1 });
+    expect(result).toEqual({
+      success: false,
+      exitCode: 1,
+      stdout: "Error: vault not found",
+      stderr: "",
+    });
   });
 });
 

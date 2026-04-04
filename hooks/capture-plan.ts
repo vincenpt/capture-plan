@@ -191,7 +191,10 @@ ${stripTitleLine(planContent)}
     const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${ampmTime}]] | ${summary} |`;
     const createResult = createVaultNote(planPath, noteContent, config.vault);
     if (!createResult.success) {
-      debugLog("Failed to create plan note\n", DEBUG_LOG);
+      debugLog(
+        `Failed to create plan note: stdout=${createResult.stdout} stderr=${createResult.stderr}\n`,
+        DEBUG_LOG,
+      );
       process.exit(0);
     }
 
