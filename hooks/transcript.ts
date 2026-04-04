@@ -64,6 +64,8 @@ export interface ToolLogEntry {
   input: Record<string, unknown>;
   isError: boolean;
   blockId?: string;
+  /** User's chosen answer from the tool_result content (populated for AskUserQuestion). */
+  answer?: string;
 }
 
 /** A full assistant turn in the tool log: timestamp, tokens, justification text, and tool calls. */
@@ -546,12 +548,17 @@ export function collectToolLog(
       if (block.type === "text" && block.text) justParts.push(block.text);
     }
 
-    // Build error map from next human entry
+    // Build error map and answer map from next human entry
     const errorIds = new Set<string>();
+    const answerMap = new Map<string, string>();
     if (i + 1 <= end && entries[i + 1].type === "human") {
       for (const block of getUserContentBlocks(entries[i + 1])) {
-        if (block.type === "tool_result" && block.is_error && block.tool_use_id) {
-          errorIds.add(block.tool_use_id);
+        if (block.type === "tool_result" && block.tool_use_id) {
+          if (block.is_error) {
+            errorIds.add(block.tool_use_id);
+          } else if (typeof block.content === "string" && block.content) {
+            answerMap.set(block.tool_use_id, block.content);
+          }
         }
       }
     }
@@ -562,12 +569,15 @@ export function collectToolLog(
       seq++;
       const isError = block.id ? errorIds.has(block.id) : false;
       if (isError) totalErrors++;
+      const answer =
+        block.name === "AskUserQuestion" && block.id ? answerMap.get(block.id) : undefined;
       tools.push({
         seq,
         name: block.name as string,
         input: block.input ?? {},
         isError,
         blockId: block.id,
+        ...(answer !== undefined ? { answer } : {}),
       });
     }
 

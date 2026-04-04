@@ -80,7 +80,7 @@ export function skillEntry(
 /** Factory for building human transcript entries in tests. */
 export function humanEntry(
   overrides: Partial<TranscriptEntry> & {
-    toolResults?: { tool_use_id: string; is_error?: boolean }[];
+    toolResults?: { tool_use_id: string; is_error?: boolean; content?: string }[];
   } = {},
 ): TranscriptEntry {
   const { toolResults, ...rest } = overrides;
@@ -89,6 +89,7 @@ export function humanEntry(
         type: "tool_result" as const,
         tool_use_id: r.tool_use_id,
         ...(r.is_error ? { is_error: true as const } : {}),
+        ...(typeof r.content === "string" ? { content: r.content } : {}),
       }))
     : [{ type: "text" as const, text: "user message" }];
   return {

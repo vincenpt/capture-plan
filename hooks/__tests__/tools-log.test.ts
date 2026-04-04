@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { aggregateSidechainStats, formatToolArgs, formatToolsLogContent } from "../shared.ts";
+import {
+  aggregateSidechainStats,
+  formatAskUserQuestion,
+  formatToolArgs,
+  formatToolsLogContent,
+} from "../shared.ts";
 import type { ToolLog, TurnLogEntry } from "../transcript.ts";
 
 describe("formatToolArgs", () => {
@@ -179,6 +184,127 @@ describe("formatToolArgs", () => {
     const { table } = formatToolArgs("Grep", { pattern: "hello" });
     expect(table).toContain("| **Grep** | |");
     expect(table).not.toContain("❌");
+  });
+});
+
+describe("formatAskUserQuestion", () => {
+  const singleQuestion = {
+    questions: [
+      {
+        question: "Which component pattern should we use for the widget?",
+        header: "Pattern",
+        options: [
+          { label: "Functional (Recommended)", description: "Stateless functional component" },
+          { label: "Class-based", description: "Traditional class component" },
+        ],
+        multiSelect: false,
+      },
+    ],
+  };
+
+  it("renders question text in italics in table value column", () => {
+    const { table } = formatAskUserQuestion(singleQuestion);
+    expect(table).toContain(
+      "| question | *Which component pattern should we use for the widget?* |",
+    );
+  });
+
+  it("renders header field in table when present", () => {
+    const { table } = formatAskUserQuestion(singleQuestion);
+    expect(table).toContain("| header | Pattern |");
+  });
+
+  it("renders AskUserQuestion in bold in table header", () => {
+    const { table } = formatAskUserQuestion(singleQuestion);
+    expect(table).toContain("| **AskUserQuestion** | |");
+  });
+
+  it("renders choices with selected answer checked", () => {
+    const { codeFence } = formatAskUserQuestion(singleQuestion, {
+      answer: "Functional (Recommended)",
+    });
+    expect(codeFence).toContain("- [x] **Functional (Recommended)** -- Stateless functional");
+    expect(codeFence).toContain("- [ ] Class-based -- Traditional class component");
+  });
+
+  it("renders all choices unchecked when no answer provided", () => {
+    const { codeFence } = formatAskUserQuestion(singleQuestion);
+    expect(codeFence).toContain("- [ ] Functional (Recommended)");
+    expect(codeFence).toContain("- [ ] Class-based");
+    expect(codeFence).not.toContain("[x]");
+  });
+
+  it("renders all choices unchecked when answer does not match any option", () => {
+    const { codeFence } = formatAskUserQuestion(singleQuestion, { answer: "Other" });
+    expect(codeFence).not.toContain("[x]");
+  });
+
+  it("truncates long question text", () => {
+    const longQ = {
+      questions: [{ question: "A".repeat(150), options: [] }],
+    };
+    const { table } = formatAskUserQuestion(longQ);
+    expect(table).toContain("A".repeat(120));
+    expect(table).toContain("...*");
+    expect(table).not.toContain("A".repeat(150));
+  });
+
+  it("handles question with no options", () => {
+    const noOpts = { questions: [{ question: "What name?" }] };
+    const { table, codeFence } = formatAskUserQuestion(noOpts);
+    expect(table).toContain("*What name?*");
+    expect(codeFence).toBe("");
+  });
+
+  it("handles options without descriptions", () => {
+    const noDesc = {
+      questions: [{ question: "Pick one", options: [{ label: "A" }, { label: "B" }] }],
+    };
+    const { codeFence } = formatAskUserQuestion(noDesc, { answer: "A" });
+    expect(codeFence).toContain("- [x] **A**");
+    expect(codeFence).toContain("- [ ] B");
+    expect(codeFence).not.toContain("--");
+  });
+
+  it("renders multiple questions as separate table+choices blocks", () => {
+    const multi = {
+      questions: [
+        { question: "First?", options: [{ label: "A" }, { label: "B" }] },
+        { question: "Second?", options: [{ label: "X" }, { label: "Y" }] },
+      ],
+    };
+    const { table, codeFence } = formatAskUserQuestion(multi);
+    expect(table).toContain("*First?*");
+    expect(table).toContain("*Second?*");
+    expect(codeFence).toContain("- [ ] A");
+    expect(codeFence).toContain("- [ ] X");
+  });
+
+  it("falls back to generic formatting for unparseable questions", () => {
+    const invalid = { questions: "not an array" };
+    const { table } = formatAskUserQuestion(invalid);
+    expect(table).toContain("| **AskUserQuestion** | |");
+    expect(table).toContain("| questions | not an array |");
+  });
+
+  it("includes error mark in table header", () => {
+    const { table } = formatAskUserQuestion(singleQuestion, { errorMark: " ❌" });
+    expect(table).toContain("| **AskUserQuestion** ❌ | |");
+  });
+
+  it("escapes pipe characters in question and option text", () => {
+    const pipes = {
+      questions: [
+        {
+          question: "Use foo|bar?",
+          options: [{ label: "opt|A", description: "desc|val" }],
+        },
+      ],
+    };
+    const { table, codeFence } = formatAskUserQuestion(pipes, { answer: "opt|A" });
+    expect(table).toContain("foo\\|bar");
+    expect(codeFence).toContain("opt\\|A");
+    expect(codeFence).toContain("desc\\|val");
   });
 });
 
@@ -715,6 +841,97 @@ describe("formatToolsLogContent", () => {
     expect(second.content).toContain("subagent_type: plan");
     expect(second.content).toContain("sidechain_turns: 1");
     expect(second.content).toContain("tokens_in: 300");
+  });
+
+  it("renders AskUserQuestion with question text and checked choices in tools-log", () => {
+    const log: ToolLog = {
+      turns: [
+        {
+          turnNumber: 1,
+          timestamp: "2026-03-30T14:00:00.000Z",
+          durationMs: 5000,
+          tokensIn: 2700,
+          tokensOut: 250,
+          justification: "Before finalizing, I have a question.",
+          tools: [
+            {
+              seq: 1,
+              name: "AskUserQuestion",
+              input: {
+                questions: [
+                  {
+                    question: "Which pattern should we use?",
+                    header: "Pattern",
+                    options: [
+                      { label: "Functional", description: "With hooks" },
+                      { label: "Class-based", description: "Traditional" },
+                    ],
+                  },
+                ],
+              },
+              isError: false,
+              answer: "Functional",
+            },
+          ],
+          isSidechain: false,
+        },
+      ],
+      totalToolCalls: 1,
+      totalErrors: 0,
+    };
+    const result = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: log,
+      execLog: null,
+    });
+    const md = result?.markdown ?? "";
+    expect(md).toContain("### Turn 1: AskUserQuestion");
+    expect(md).toContain("*Which pattern should we use?*");
+    expect(md).toContain("| header | Pattern |");
+    expect(md).toContain("- [x] **Functional** -- With hooks");
+    expect(md).toContain("- [ ] Class-based -- Traditional");
+  });
+
+  it("renders AskUserQuestion without answer as all unchecked", () => {
+    const log: ToolLog = {
+      turns: [
+        {
+          turnNumber: 1,
+          timestamp: "2026-03-30T14:00:00.000Z",
+          durationMs: 1000,
+          tokensIn: 100,
+          tokensOut: 50,
+          justification: "",
+          tools: [
+            {
+              seq: 1,
+              name: "AskUserQuestion",
+              input: {
+                questions: [
+                  {
+                    question: "Pick one",
+                    options: [{ label: "A" }, { label: "B" }],
+                  },
+                ],
+              },
+              isError: false,
+            },
+          ],
+          isSidechain: false,
+        },
+      ],
+      totalToolCalls: 1,
+      totalErrors: 0,
+    };
+    const result = formatToolsLogContent({
+      ...baseLogOpts,
+      planLog: null,
+      execLog: log,
+    });
+    const md = result?.markdown ?? "";
+    expect(md).toContain("- [ ] A");
+    expect(md).toContain("- [ ] B");
+    expect(md).not.toContain("[x]");
   });
 });
 

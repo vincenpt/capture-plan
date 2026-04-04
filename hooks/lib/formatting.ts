@@ -196,6 +196,94 @@ ${body}
 const LARGE_CONTENT_KEYS = new Set(["old_string", "new_string"]);
 const ARG_MAX_LEN = 100;
 const ARG_PREVIEW_LEN = 60;
+const QUESTION_MAX_LEN = 120;
+
+interface AskUserOption {
+  label: string;
+  description?: string;
+}
+
+interface AskUserQuestionItem {
+  question: string;
+  header?: string;
+  options?: AskUserOption[];
+}
+
+/** Parse the questions array from AskUserQuestion input into typed items. */
+function parseAskUserQuestions(input: Record<string, unknown>): AskUserQuestionItem[] {
+  const raw = input.questions;
+  if (!Array.isArray(raw)) return [];
+  const results: AskUserQuestionItem[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const q = item as Record<string, unknown>;
+    if (typeof q.question !== "string") continue;
+    const options: AskUserOption[] = [];
+    if (Array.isArray(q.options)) {
+      for (const opt of q.options) {
+        if (typeof opt !== "object" || opt === null) continue;
+        const o = opt as Record<string, unknown>;
+        if (typeof o.label !== "string") continue;
+        options.push({
+          label: o.label,
+          ...(typeof o.description === "string" ? { description: o.description } : {}),
+        });
+      }
+    }
+    results.push({
+      question: q.question,
+      ...(typeof q.header === "string" ? { header: q.header } : {}),
+      ...(options.length > 0 ? { options } : {}),
+    });
+  }
+  return results;
+}
+
+/** Format an AskUserQuestion tool invocation as a table with question text and a choices checklist. */
+export function formatAskUserQuestion(
+  input: Record<string, unknown>,
+  opts?: { errorMark?: string; answer?: string },
+): { table: string; codeFence: string } {
+  const questions = parseAskUserQuestions(input);
+  if (questions.length === 0) {
+    return formatToolArgs("AskUserQuestion", input, { errorMark: opts?.errorMark });
+  }
+
+  const tables: string[] = [];
+  const choicesBlocks: string[] = [];
+
+  for (const q of questions) {
+    const questionText =
+      q.question.length > QUESTION_MAX_LEN
+        ? `*${escapeTableCell(q.question.slice(0, QUESTION_MAX_LEN))}...*`
+        : `*${escapeTableCell(q.question)}*`;
+
+    const rows: [string, string][] = [["question", questionText]];
+    if (q.header) rows.push(["header", escapeTableCell(q.header)]);
+
+    const header = `| **AskUserQuestion**${opts?.errorMark ?? ""} | |`;
+    const divider = "|---|---|";
+    const body = rows.map(([k, v]) => `| ${k} | ${v} |`).join("\n");
+    tables.push(`${header}\n${divider}\n${body}`);
+
+    if (q.options && q.options.length > 0) {
+      const lines: string[] = [];
+      for (const opt of q.options) {
+        const isSelected = opts?.answer === opt.label;
+        const checkbox = isSelected ? "[x]" : "[ ]";
+        const label = isSelected ? `**${escapeTableCell(opt.label)}**` : escapeTableCell(opt.label);
+        const desc = opt.description ? ` -- ${escapeTableCell(opt.description)}` : "";
+        lines.push(`- ${checkbox} ${label}${desc}`);
+      }
+      choicesBlocks.push(lines.join("\n"));
+    }
+  }
+
+  return {
+    table: tables.join("\n\n"),
+    codeFence: choicesBlocks.join("\n\n"),
+  };
+}
 
 /** Format a tool invocation's arguments as a markdown table and optional code fence for the tool log. */
 export function formatToolArgs(
@@ -417,6 +505,19 @@ export function formatToolsLogContent(opts: {
       }
 
       for (const tool of turn.tools) {
+        const errorMark = tool.isError ? " ❌" : undefined;
+
+        // AskUserQuestion → dedicated renderer with question text + choices
+        if (tool.name === "AskUserQuestion") {
+          const { table, codeFence } = formatAskUserQuestion(tool.input, {
+            errorMark,
+            answer: tool.answer,
+          });
+          if (table) sections.push(`${table}\n`);
+          if (codeFence) sections.push(`${codeFence}\n`);
+          continue;
+        }
+
         // Build Agent prompt link if applicable
         let agentPromptLink: string | undefined;
         let skipDescription = false;
@@ -466,7 +567,6 @@ export function formatToolsLogContent(opts: {
           skipDescription = true;
         }
 
-        const errorMark = tool.isError ? " ❌" : undefined;
         const { table, codeFence } = formatToolArgs(tool.name, tool.input, {
           agentPromptLink,
           errorMark,

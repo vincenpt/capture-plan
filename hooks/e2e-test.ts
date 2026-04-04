@@ -762,6 +762,18 @@ async function main(): Promise<void> {
       "tools-log has agent wikilink",
       logContent.includes("agents/") && logContent.includes("Verify widget integration"),
     );
+    record(
+      "capture-done",
+      "tools-log renders AskUserQuestion question text",
+      logContent.includes("*Which component pattern should we use for the widget?*") &&
+        logContent.includes("*What level of test coverage do you want for the widget?*"),
+    );
+    record(
+      "capture-done",
+      "tools-log renders AskUserQuestion selected answers",
+      logContent.includes("[x] **Functional (Recommended)**") &&
+        logContent.includes("[x] **Unit + integration**"),
+    );
   }
 
   // Validate state.md cleaned up
