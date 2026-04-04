@@ -5,7 +5,7 @@ import type { ToolLog, TurnLogEntry } from "../transcript.ts";
 describe("formatToolArgs", () => {
   it("formats file_path as table with backticks", () => {
     const { table, codeFence } = formatToolArgs("Read", { file_path: "/src/foo.ts" });
-    expect(table).toContain("| Read | |");
+    expect(table).toContain("| **Read** | |");
     expect(table).toContain("| file_path | `/src/foo.ts` |");
     expect(codeFence).toBe("");
   });
@@ -172,12 +172,12 @@ describe("formatToolArgs", () => {
 
   it("includes error mark in table header when provided", () => {
     const { table } = formatToolArgs("Grep", { pattern: "hello" }, { errorMark: " ❌" });
-    expect(table).toContain("| Grep ❌ | |");
+    expect(table).toContain("| **Grep** ❌ | |");
   });
 
   it("omits error mark from table header when not provided", () => {
     const { table } = formatToolArgs("Grep", { pattern: "hello" });
-    expect(table).toContain("| Grep | |");
+    expect(table).toContain("| **Grep** | |");
     expect(table).not.toContain("❌");
   });
 });
@@ -273,14 +273,12 @@ describe("formatToolsLogContent", () => {
     const md = result?.markdown ?? "";
     // Tool names in turn heading
     expect(md).toContain("### Turn 1: Read, Grep");
-    // No bold tool name lines
-    expect(md).not.toContain("**Read**");
-    expect(md).not.toContain("**Grep**");
+    // Bold tool names in table headers
+    expect(md).toContain("| **Read** | |");
+    expect(md).toContain("| **Grep** ❌ | |");
     // Table args still present
     expect(md).toContain("| file_path | `/src/foo.ts` |");
     expect(md).toContain("| pattern | hello |");
-    // Error mark in table header
-    expect(md).toContain("| Grep ❌ | |");
   });
 
   it("renders both phases", () => {

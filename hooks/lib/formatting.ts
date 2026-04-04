@@ -286,7 +286,7 @@ export function formatToolArgs(
 
   let table = "";
   if (rows.length > 0) {
-    const displayName = toolName === "Agent" ? `**${toolName}**` : toolName;
+    const displayName = `**${toolName}**`;
     const header = `| ${displayName}${opts?.errorMark ?? ""} | |`;
     const divider = "|---|---|";
     const body = rows.map(([k, v]) => `| ${k} | ${v} |`).join("\n");
@@ -404,7 +404,7 @@ export function formatToolsLogContent(opts: {
       const toolNames = [...new Set(turn.tools.map((t) => t.name))].join(", ");
       const toolLabel = toolNames ? `: ${toolNames}` : "";
       sections.push(
-        `### Turn ${turn.turnNumber}${toolLabel} — ${tsLabel} (${durLabel} | ${tokLabel})${sidechain}\n^turn-${turn.turnNumber}\n`,
+        `### Turn ${turn.turnNumber}${toolLabel} — ${tsLabel} (${durLabel} | ${tokLabel})${sidechain} ^turn-${turn.turnNumber}\n`,
       );
 
       if (turn.isSidechain && turn.agentId) {
