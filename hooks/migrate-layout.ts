@@ -71,11 +71,15 @@ async function main(): Promise<void> {
       }
 
       if (allMoves.length === 0) {
-        console.log("  No plan directories to move.");
+        console.log("  No items to move.");
       } else {
-        console.log(
-          `  ${allMoves.length} plan director${allMoves.length === 1 ? "y" : "ies"} to move:\n`,
-        );
+        const planCount = allMoves.filter((m) => m.type === "plan-dir").length;
+        const looseCount = allMoves.filter((m) => m.type === "loose").length;
+        const parts = [
+          planCount > 0 ? `${planCount} plan dir${planCount === 1 ? "" : "s"}` : "",
+          looseCount > 0 ? `${looseCount} loose item${looseCount === 1 ? "" : "s"}` : "",
+        ].filter(Boolean);
+        console.log(`  ${parts.join(", ")} to move:\n`);
         printMoves(allMoves, vaultPath);
 
         if (!args.dryRun) {
@@ -85,7 +89,7 @@ async function main(): Promise<void> {
           totalMoves += moved;
           totalCleaned += cleaned;
           console.log(
-            `  ✓ Moved ${moved} director${moved === 1 ? "y" : "ies"}, cleaned ${cleaned} empty dir${cleaned === 1 ? "" : "s"}`,
+            `  ✓ Moved ${moved} item${moved === 1 ? "" : "s"}, cleaned ${cleaned} empty dir${cleaned === 1 ? "" : "s"}`,
           );
         }
       }

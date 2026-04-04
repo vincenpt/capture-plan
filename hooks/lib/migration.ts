@@ -128,7 +128,7 @@ export function parseDateFromPath(
 export interface MoveEntry {
   from: string;
   to: string;
-  type: "plan-dir" | "journal-file";
+  type: "plan-dir" | "journal-file" | "loose";
 }
 
 /** Compute all moves needed to migrate plan directories from one scheme to another. */
@@ -154,13 +154,12 @@ export function computePlanMoves(
         const targetSeg = formatDatePath(toScheme, parts);
         const targetPath = join(basePath, targetSeg);
 
-        // Move each plan dir inside the flat date dir
         for (const planEntry of readdirSync(entryPath)) {
-          if (!PLAN_DIR_PATTERN.test(planEntry)) continue;
+          if (isHidden(planEntry)) continue;
           moves.push({
             from: join(entryPath, planEntry),
             to: join(targetPath, planEntry),
-            type: "plan-dir",
+            type: PLAN_DIR_PATTERN.test(planEntry) ? "plan-dir" : "loose",
           });
         }
       }
@@ -205,11 +204,11 @@ function collectPlanMovesUnderYear(
       const targetSeg = formatDatePath(toScheme, parts);
 
       for (const planEntry of readdirSync(datePath)) {
-        if (!PLAN_DIR_PATTERN.test(planEntry)) continue;
+        if (isHidden(planEntry)) continue;
         moves.push({
           from: join(datePath, planEntry),
           to: join(basePath, targetSeg, planEntry),
-          type: "plan-dir",
+          type: PLAN_DIR_PATTERN.test(planEntry) ? "plan-dir" : "loose",
         });
       }
     } else if (
@@ -230,11 +229,11 @@ function collectPlanMovesUnderYear(
           const targetSeg = formatDatePath(toScheme, parts);
 
           for (const planEntry of readdirSync(dayPath)) {
-            if (!PLAN_DIR_PATTERN.test(planEntry)) continue;
+            if (isHidden(planEntry)) continue;
             moves.push({
               from: join(dayPath, planEntry),
               to: join(basePath, targetSeg, planEntry),
-              type: "plan-dir",
+              type: PLAN_DIR_PATTERN.test(planEntry) ? "plan-dir" : "loose",
             });
           }
         }
@@ -401,4 +400,8 @@ function isDir(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isHidden(name: string): boolean {
+  return name.startsWith(".");
 }
