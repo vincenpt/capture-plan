@@ -197,18 +197,18 @@ export function parsePlanFrontmatter(content: string): PlanFrontmatter {
   return result;
 }
 
-/** Append a markdown table row beneath an existing plan section header in the journal file. */
-export async function appendRowToJournalSection(
+/** Append a revision bullet to an existing callout block with the given title in the journal file. */
+export async function appendRevisionToCallout(
   planTitle: string,
-  tableRow: string,
+  revision: string,
   journalFilePath: string,
 ): Promise<boolean> {
   try {
     const content = await Bun.file(journalFilePath).text();
     const lines = content.split("\n");
 
-    // Find ### Plan Title header
-    const headerPattern = `### ${planTitle}`;
+    // Find > [!plan]+ {title} header
+    const headerPattern = `> [!plan]+ ${planTitle}`;
     let headerIdx = -1;
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].trim() === headerPattern) {
@@ -218,17 +218,16 @@ export async function appendRowToJournalSection(
     }
     if (headerIdx === -1) return false;
 
-    // Find last table row in this section (before next ### or EOF)
-    let lastTableRowIdx = -1;
+    // Find the last line starting with ">" in this callout block
+    let lastCalloutLine = headerIdx;
     for (let i = headerIdx + 1; i < lines.length; i++) {
-      if (lines[i].startsWith("### ") || lines[i].startsWith("## ")) break;
-      if (lines[i].trim().startsWith("|") && !lines[i].trim().startsWith("|---")) {
-        lastTableRowIdx = i;
-      }
+      if (!lines[i].startsWith(">")) break;
+      lastCalloutLine = i;
     }
-    if (lastTableRowIdx === -1) return false;
 
-    lines.splice(lastTableRowIdx + 1, 0, tableRow);
+    // Insert the new revision lines after the last callout line
+    const revisionLines = revision.split("\n");
+    lines.splice(lastCalloutLine + 1, 0, ...revisionLines);
     await Bun.write(journalFilePath, lines.join("\n"));
     return true;
   } catch {

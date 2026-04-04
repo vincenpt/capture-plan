@@ -2,25 +2,26 @@
 // capture-plan.ts — Claude Code Hook for ExitPlanMode
 // Captures plans and persists them to Obsidian vault
 
-import { join } from "node:path";
 import { PLAN_SYSTEM_PROMPT } from "./lib/prompts.ts";
 import {
-  appendToJournal,
+  appendOrCreateCallout,
   createVaultNote,
   debugLog,
   detectCcVersion,
   extractTitle,
   findTranscriptPath,
   formatCcVersionYaml,
+  formatJournalRevision,
+  formatModelLabel,
   formatModelYaml,
   formatTagsYaml,
   getDateParts,
+  getDayName,
   getJournalPath,
   getPlanDatePath,
   getProjectName,
   getVaultPath,
   loadConfig,
-  mergeTagsOnDailyNote,
   nextCounter,
   padCounter,
   readCcVersion,
@@ -30,6 +31,7 @@ import {
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
+  updateJournalFrontmatter,
   writeVaultState,
 } from "./shared.ts";
 import {
@@ -190,7 +192,6 @@ session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
 ${stripTitleLine(planContent)}
 `;
 
-    const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${ampmTime}]] | ${summary} |`;
     const createResult = createVaultNote(planPath, noteContent, config.vault);
     if (!createResult.success) {
       debugLog(
@@ -200,8 +201,31 @@ ${stripTitleLine(planContent)}
       process.exit(0);
     }
 
-    appendToJournal(journalEntry, journalPath, config.vault);
-    mergeTagsOnDailyNote(newTags, journalPath, config.vault);
+    // Build journal callout revision and append (grouping by title)
+    const modelLabel = formatModelLabel(stats?.model, contextCap);
+    const revision = formatJournalRevision(
+      ampmTime,
+      planPath,
+      "plan",
+      modelLabel,
+      summary,
+      newTags,
+    );
+    await appendOrCreateCallout(
+      title,
+      revision,
+      project,
+      "plan-mode",
+      journalPath,
+      vaultPath,
+      config.vault,
+    );
+
+    updateJournalFrontmatter(
+      journalPath,
+      { date: dateKey, day: getDayName(), project, tags: newTags },
+      config.vault,
+    );
 
     // Write session state for the Stop hook to pick up
     const state: SessionState = {

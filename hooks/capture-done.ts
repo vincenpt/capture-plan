@@ -6,8 +6,7 @@ import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { DONE_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, SKILL_SYSTEM_PROMPT } from "./lib/prompts.ts";
 import {
-  appendRowToJournalSection,
-  appendToJournal,
+  appendOrCreateCallout,
   type Config,
   createVaultNote,
   debugLog,
@@ -17,18 +16,20 @@ import {
   findTranscriptPath,
   formatCcVersionYaml,
   formatDuration,
+  formatJournalRevision,
+  formatModelLabel,
   formatModelYaml,
   formatTagsYaml,
   formatToolsLogContent,
   formatToolsNoteContent,
   getDateParts,
+  getDayName,
   getJournalPath,
   getPlanDatePath,
   getProjectName,
   getVaultPath,
   loadConfig,
   mergeTags,
-  mergeTagsOnDailyNote,
   nextCounter,
   padCounter,
   readCcVersion,
@@ -39,6 +40,7 @@ import {
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
+  updateJournalFrontmatter,
   writeVaultState,
 } from "./shared.ts";
 import {
@@ -160,9 +162,32 @@ ${stripTitleLine(spec.content)}
     createVaultNote(`${planDir}/spec`, specNoteContent, config.vault);
   }
 
-  const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${ampmTime}]] | ${summary} |`;
-  appendToJournal(journalEntry, journalPath, config.vault);
-  mergeTagsOnDailyNote(newTags, journalPath, config.vault);
+  // Build journal callout revision and append (grouping by title)
+  const spModelLabel = formatModelLabel(planStats?.model, contextCap);
+  const spRevision = formatJournalRevision(
+    ampmTime,
+    planPath,
+    "plan",
+    spModelLabel,
+    summary,
+    newTags,
+  );
+  const spVaultPath = getVaultPath(config.vault);
+  await appendOrCreateCallout(
+    title,
+    spRevision,
+    project,
+    "superpowers",
+    journalPath,
+    spVaultPath,
+    config.vault,
+  );
+
+  updateJournalFrontmatter(
+    journalPath,
+    { date: dateKey, day: getDayName(), project, tags: newTags },
+    config.vault,
+  );
 
   const state: SessionState = {
     session_id: sessionId,
@@ -310,10 +335,32 @@ ${contextText || "_No context captured_"}
     return null;
   }
 
-  // Journal entry
-  const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${activityPath}\\|${ampmTime}]] | ${summary} |`;
-  appendToJournal(journalEntry, journalPath, config.vault);
-  mergeTagsOnDailyNote(newTags, journalPath, config.vault);
+  // Build journal callout revision and append (grouping by title)
+  const skillModelLabel = formatModelLabel(planStats?.model, contextCap);
+  const skillRevision = formatJournalRevision(
+    ampmTime,
+    activityPath,
+    "activity",
+    skillModelLabel,
+    summary,
+    newTags,
+  );
+  const skillVaultPath = getVaultPath(config.vault);
+  await appendOrCreateCallout(
+    title,
+    skillRevision,
+    project,
+    "skill",
+    journalPath,
+    skillVaultPath,
+    config.vault,
+  );
+
+  updateJournalFrontmatter(
+    journalPath,
+    { date: dateKey, day: getDayName(), project, tags: newTags },
+    config.vault,
+  );
 
   const state: SessionState = {
     session_id: sessionId,
@@ -706,27 +753,33 @@ ${contextText || "_No context captured_"}
       }
     }
 
-    // Append row to existing plan section in journal
-    const tableRow = `| [[${summaryPath}\\|${ampmTime}]] | ${summary} |`;
-    let appended = false;
+    // Append summary revision to existing plan callout in journal
+    const doneModelLabel = formatModelLabel(transcriptStats?.model, contextCap);
+    const doneRevision = formatJournalRevision(
+      ampmTime,
+      summaryPath,
+      "done",
+      doneModelLabel,
+      summary,
+      newTags,
+    );
     const journalToModify = state.journal_path || journalPath;
+    await appendOrCreateCallout(
+      state.plan_title,
+      doneRevision,
+      project,
+      state.source || "plan-mode",
+      journalToModify,
+      vaultPath,
+      config.vault,
+      journalPath,
+    );
 
-    if (vaultPath) {
-      const journalFile = journalToModify.endsWith(".md")
-        ? journalToModify
-        : `${journalToModify}.md`;
-      const fullJournalPath = join(vaultPath, journalFile);
-      appended = await appendRowToJournalSection(state.plan_title, tableRow, fullJournalPath);
-      debugLog(`appendRowToJournalSection: ${appended}\n`, DEBUG_LOG);
-    }
-
-    if (!appended) {
-      // Fallback: create a new section (different day, missing file, etc.)
-      const fallbackEntry = `\\n### ${state.plan_title}\\n\\n| | |\\n|---|---|\\n| [[${summaryPath}\\|${ampmTime}]] | ${summary} |`;
-      appendToJournal(fallbackEntry, journalPath, config.vault);
-    }
-
-    mergeTagsOnDailyNote(newTags, journalPath, config.vault);
+    updateJournalFrontmatter(
+      journalPath,
+      { date: state.date_key, day: getDayName(), project, tags: newTags },
+      config.vault,
+    );
 
     // Clean up session state from vault
     if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);

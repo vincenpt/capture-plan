@@ -6,13 +6,15 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  appendToJournal,
+  appendOrCreateCallout,
   type Config,
   createVaultNote,
   extractTitle,
   FLAT_DATE_PATTERN,
+  formatJournalRevision,
   formatTagsYaml,
   getDatePartsFor,
+  getDayName,
   getJournalPathForDate,
   getPlanDatePath,
   getProjectLabel,
@@ -20,7 +22,6 @@ import {
   getVaultPath,
   isDir,
   loadConfig,
-  mergeTagsOnDailyNote,
   nextCounter,
   PLAN_DIR_PATTERN,
   padCounter,
@@ -29,6 +30,7 @@ import {
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
+  updateJournalFrontmatter,
   YEAR_PATTERN,
 } from "./shared.ts";
 
@@ -334,12 +336,32 @@ source_slug: ${plan.sourceSlug}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
 ${stripTitleLine(content)}
 `;
 
-      const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${plan.ampmTime || "Plan"}]] | ${summary} |`;
+      const revision = formatJournalRevision(
+        plan.ampmTime || "Plan",
+        planPath,
+        "plan",
+        "",
+        summary,
+        tags,
+      );
 
       if (!options.dryRun) {
         createVaultNote(planPath, noteContent, config.vault);
-        appendToJournal(journalEntry, journalPath, config.vault);
-        mergeTagsOnDailyNote(tags, journalPath, config.vault);
+        await appendOrCreateCallout(
+          title,
+          revision,
+          project,
+          "plan-mode",
+          journalPath,
+          vaultPath,
+          config.vault,
+        );
+
+        updateJournalFrontmatter(
+          journalPath,
+          { date: plan.date, day: getDayName(new Date(`${plan.date}T12:00:00`)), project, tags },
+          config.vault,
+        );
       }
 
       result.created++;
