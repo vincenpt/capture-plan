@@ -202,3 +202,55 @@ export function formatCcVersionYaml(ccVersion?: string): string {
   if (!ccVersion) return "";
   return `\ncc_version: "${ccVersion}"`;
 }
+
+/** Format model name and context cap as a compact inline label (e.g. "opus-4(200K)"). */
+export function formatModelLabel(model?: string, contextCap?: number): string {
+  if (!model) return "";
+  if (!contextCap || contextCap <= 0) return model;
+  return `${model}(${contextCapLabel(contextCap)})`;
+}
+
+/** Format comma-separated tags as inline hashtags (e.g. "#tag1 #tag2"). */
+export function formatHashtags(tagsCsv: string): string {
+  const tags = tagsCsv
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (tags.length === 0) return "";
+  return tags.map((t) => `#${t}`).join(" ");
+}
+
+/** Build a single journal revision bullet line for use inside a callout block. */
+export function formatJournalRevision(
+  time: string,
+  planPath: string,
+  linkText: string,
+  modelLabel: string,
+  summary: string,
+  tags: string,
+): string {
+  const modelPart = modelLabel ? ` \`${modelLabel}\`` : "";
+  const tagLine = formatHashtags(tags);
+  const lines = [`> - **${time}** [[${planPath}|${linkText}]]${modelPart}`, `>   ${summary}`];
+  if (tagLine) lines.push(`>   ${tagLine}`);
+  return lines.join("\n");
+}
+
+/** Build a complete journal callout block with header, metadata, and initial revision. */
+export function formatJournalCallout(
+  title: string,
+  project: string,
+  source: string,
+  revision: string,
+): string {
+  const metaParts: string[] = [];
+  if (project) metaParts.push(`\`${project}\``);
+  metaParts.push(`\`${source}\``);
+  const metaLine = metaParts.join(" \u00b7 ");
+  return `> [!plan]+ ${title}\n> ${metaLine}\n>\n${revision}`;
+}
+
+/** Escape content for the Obsidian CLI append command: newlines and wikilink pipes. */
+export function escapeForObsidianAppend(content: string): string {
+  return content.replace(/\n/g, "\\n").replace(/\[\[([^\]]*?)\|([^\]]*?)\]\]/g, "[[$1\\|$2]]");
+}

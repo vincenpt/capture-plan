@@ -5,6 +5,7 @@
 import { join } from "node:path";
 import { PLAN_SYSTEM_PROMPT } from "./lib/prompts.ts";
 import {
+  appendRevisionToCallout,
   appendToJournal,
   createVaultNote,
   debugLog,
@@ -12,6 +13,9 @@ import {
   extractTitle,
   findTranscriptPath,
   formatCcVersionYaml,
+  formatJournalCallout,
+  formatJournalRevision,
+  formatModelLabel,
   formatModelYaml,
   formatTagsYaml,
   getDateParts,
@@ -20,7 +24,6 @@ import {
   getProjectName,
   getVaultPath,
   loadConfig,
-  mergeTagsOnDailyNote,
   nextCounter,
   padCounter,
   readCcVersion,
@@ -30,6 +33,7 @@ import {
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
+  updateJournalFrontmatter,
   writeVaultState,
 } from "./shared.ts";
 import {
@@ -190,7 +194,6 @@ session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
 ${stripTitleLine(planContent)}
 `;
 
-    const journalEntry = `\\n### ${title}\\n\\n| | |\\n|---|---|\\n| [[${planPath}\\|${ampmTime}]] | ${summary} |`;
     const createResult = createVaultNote(planPath, noteContent, config.vault);
     if (!createResult.success) {
       debugLog(
@@ -200,8 +203,37 @@ ${stripTitleLine(planContent)}
       process.exit(0);
     }
 
-    appendToJournal(journalEntry, journalPath, config.vault);
-    mergeTagsOnDailyNote(newTags, journalPath, config.vault);
+    // Build journal callout revision and append (grouping by title)
+    const modelLabel = formatModelLabel(stats?.model, contextCap);
+    const revision = formatJournalRevision(
+      ampmTime,
+      planPath,
+      "plan",
+      modelLabel,
+      summary,
+      newTags,
+    );
+
+    let appended = false;
+    if (vaultPath) {
+      const journalFile = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
+      const fullJournalPath = join(vaultPath, journalFile);
+      appended = await appendRevisionToCallout(title, revision, fullJournalPath);
+      debugLog(`appendRevisionToCallout: ${appended}\n`, DEBUG_LOG);
+    }
+
+    if (!appended) {
+      const callout = formatJournalCallout(title, project, "plan-mode", revision);
+      appendToJournal(`\n\n${callout}`, journalPath, config.vault);
+    }
+
+    // Update journal frontmatter (date, day, plans count, projects, tags)
+    const dayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
+    updateJournalFrontmatter(
+      journalPath,
+      { date: dateKey, day: dayName, project, tags: newTags },
+      config.vault,
+    );
 
     // Write session state for the Stop hook to pick up
     const state: SessionState = {

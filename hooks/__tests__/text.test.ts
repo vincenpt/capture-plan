@@ -1,7 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import {
+  escapeForObsidianAppend,
   escapeTableCell,
   extractTitle,
+  formatHashtags,
+  formatJournalCallout,
+  formatJournalRevision,
+  formatModelLabel,
   formatNumber,
   formatTagsYaml,
   getProjectName,
@@ -331,5 +336,116 @@ describe("langFromPath", () => {
 
   it("returns empty string for no extension", () => {
     expect(langFromPath("Makefile")).toBe("");
+  });
+});
+
+// ---- formatModelLabel ----
+
+describe("formatModelLabel", () => {
+  it("returns empty string when no model", () => {
+    expect(formatModelLabel()).toBe("");
+    expect(formatModelLabel(undefined, 200000)).toBe("");
+  });
+
+  it("returns model name alone when no context cap", () => {
+    expect(formatModelLabel("opus-4")).toBe("opus-4");
+    expect(formatModelLabel("opus-4", 0)).toBe("opus-4");
+  });
+
+  it("returns model with context cap label", () => {
+    expect(formatModelLabel("opus-4", 200000)).toBe("opus-4(200K)");
+    expect(formatModelLabel("sonnet-4", 1000000)).toBe("sonnet-4(1M)");
+  });
+});
+
+// ---- formatHashtags ----
+
+describe("formatHashtags", () => {
+  it("formats comma-separated tags as hashtags", () => {
+    expect(formatHashtags("auth,config")).toBe("#auth #config");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(formatHashtags("")).toBe("");
+    expect(formatHashtags("  ,  ")).toBe("");
+  });
+
+  it("trims whitespace", () => {
+    expect(formatHashtags(" auth , config ")).toBe("#auth #config");
+  });
+});
+
+// ---- formatJournalRevision ----
+
+describe("formatJournalRevision", () => {
+  it("builds a revision bullet with all fields", () => {
+    const result = formatJournalRevision(
+      "2:11 PM",
+      "Plans/001-my-plan/plan",
+      "plan",
+      "opus-4(200K)",
+      "Add configurable date schemes.",
+      "config,date-schemes",
+    );
+    expect(result).toContain("> - **2:11 PM** [[Plans/001-my-plan/plan|plan]] `opus-4(200K)`");
+    expect(result).toContain(">   Add configurable date schemes.");
+    expect(result).toContain(">   #config #date-schemes");
+  });
+
+  it("omits model when empty", () => {
+    const result = formatJournalRevision("2:11 PM", "path", "plan", "", "Summary.", "tag");
+    expect(result).toContain("> - **2:11 PM** [[path|plan]]");
+    expect(result).not.toContain("`");
+  });
+
+  it("omits tag line when no tags", () => {
+    const result = formatJournalRevision("2:11 PM", "path", "plan", "opus-4(200K)", "Summary.", "");
+    expect(result).not.toContain("#");
+    const lines = result.split("\n");
+    expect(lines).toHaveLength(2);
+  });
+});
+
+// ---- formatJournalCallout ----
+
+describe("formatJournalCallout", () => {
+  it("builds a complete callout block", () => {
+    const revision = `> - **2:11 PM** [[path|plan]] \`opus-4(200K)\`
+>   Summary text.
+>   #tag1`;
+    const result = formatJournalCallout("My Plan", "my-project", "plan-mode", revision);
+    expect(result).toContain("> [!plan]+ My Plan");
+    expect(result).toContain("> `my-project` \u00b7 `plan-mode`");
+    expect(result).toContain(">\n");
+    expect(result).toContain(revision);
+  });
+
+  it("omits project when empty", () => {
+    const revision = "> - **2:11 PM** [[path|plan]]";
+    const result = formatJournalCallout("My Plan", "", "plan-mode", revision);
+    expect(result).toContain("> `plan-mode`");
+    expect(result).not.toContain("\u00b7");
+  });
+});
+
+// ---- escapeForObsidianAppend ----
+
+describe("escapeForObsidianAppend", () => {
+  it("escapes newlines", () => {
+    expect(escapeForObsidianAppend("line1\nline2")).toBe("line1\\nline2");
+  });
+
+  it("escapes pipes in wikilinks", () => {
+    expect(escapeForObsidianAppend("[[path|display]]")).toBe("[[path\\|display]]");
+  });
+
+  it("handles both newlines and wikilinks", () => {
+    const input = "> [!plan]+ Title\n> - **2:11 PM** [[path|plan]]";
+    const result = escapeForObsidianAppend(input);
+    expect(result).toBe("> [!plan]+ Title\\n> - **2:11 PM** [[path\\|plan]]");
+  });
+
+  it("does not escape pipes outside wikilinks", () => {
+    expect(escapeForObsidianAppend("a | b")).toBe("a | b");
   });
 });

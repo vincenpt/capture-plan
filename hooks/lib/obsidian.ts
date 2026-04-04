@@ -1,7 +1,7 @@
 // obsidian.ts — Obsidian CLI & vault operations
 
 import { type DateParts, formatDatePath, getDatePartsFor } from "./dates.ts";
-import { mergeTags } from "./text.ts";
+import { escapeForObsidianAppend, mergeTags } from "./text.ts";
 import type { Config } from "./types.ts";
 
 /** Execute the Obsidian CLI with the given arguments, optionally scoped to a vault. */
@@ -84,13 +84,77 @@ export function getJournalPath(config: Config): string {
   return getJournalPathForDate(config, new Date());
 }
 
-/** Append content to a journal note, creating the note first if it doesn't exist. */
+/** Append content to a journal note, creating the note first if it doesn't exist. Content is escaped for the Obsidian CLI automatically. */
 export function appendToJournal(content: string, journalPath: string, vault?: string): void {
   const pathWithExt = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
-  const result = runObsidian(["append", `path=${pathWithExt}`, `content=${content}`], vault);
+  const escaped = escapeForObsidianAppend(content);
+  const result = runObsidian(["append", `path=${pathWithExt}`, `content=${escaped}`], vault);
   if (result.exitCode !== 0) {
     // File doesn't exist yet — create it, then append
     runObsidian(["create", `path=${journalPath}`, "content= ", "silent"], vault);
-    runObsidian(["append", `path=${pathWithExt}`, `content=${content}`], vault);
+    runObsidian(["append", `path=${pathWithExt}`, `content=${escaped}`], vault);
   }
+}
+
+/** Properties to set or update on the daily journal note frontmatter. */
+export interface JournalFrontmatterProps {
+  date: string;
+  day: string;
+  project: string;
+  tags: string;
+}
+
+/** Set or update frontmatter properties on the daily journal note (date, day, plans count, projects list, tags). */
+export function updateJournalFrontmatter(
+  journalPath: string,
+  props: JournalFrontmatterProps,
+  vault?: string,
+): void {
+  if (!journalPath) return;
+  const pathWithExt = journalPath.endsWith(".md") ? journalPath : `${journalPath}.md`;
+
+  // date and day: idempotent set
+  runObsidian(
+    ["property:set", `name=date`, `value=${props.date}`, "type=date", `path=${pathWithExt}`],
+    vault,
+  );
+  runObsidian(
+    ["property:set", `name=day`, `value=${props.day}`, "type=text", `path=${pathWithExt}`],
+    vault,
+  );
+
+  // plans: read current count, increment by 1
+  const plansResult = runObsidian(["property:read", `name=plans`, `path=${pathWithExt}`], vault);
+  const currentPlans = parseInt(plansResult.stdout, 10) || 0;
+  runObsidian(
+    [
+      "property:set",
+      `name=plans`,
+      `value=${currentPlans + 1}`,
+      "type=number",
+      `path=${pathWithExt}`,
+    ],
+    vault,
+  );
+
+  // projects: read current list, add project if not present
+  if (props.project) {
+    const projResult = runObsidian(
+      ["property:read", `name=projects`, `path=${pathWithExt}`],
+      vault,
+    );
+    const existingProjects = projResult.stdout
+      .split("\n")
+      .filter((l) => !l.startsWith("Error:") && l.trim());
+    if (!existingProjects.includes(props.project)) {
+      const merged = [...existingProjects, props.project].join(",");
+      runObsidian(
+        ["property:set", `name=projects`, `value=${merged}`, "type=list", `path=${pathWithExt}`],
+        vault,
+      );
+    }
+  }
+
+  // tags: delegate to existing mergeTagsOnDailyNote
+  mergeTagsOnDailyNote(props.tags, journalPath, vault);
 }

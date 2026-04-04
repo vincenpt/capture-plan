@@ -308,88 +308,82 @@ describe("deleteVaultState", () => {
   });
 });
 
-// ---- appendRowToJournalSection ----
+// ---- appendRevisionToCallout ----
 
-describe("appendRowToJournalSection", () => {
-  it("inserts a row after the last table row in the matching section", async () => {
+describe("appendRevisionToCallout", () => {
+  it("inserts a revision after the last callout line in the matching block", async () => {
     const journalFile = join(tempDir, "journal.md");
     await Bun.write(
       journalFile,
-      `## Claude Sessions
+      `> [!plan]+ My Plan
+> \`project\` \u00b7 \`plan-mode\`
+>
+> - **10:30 AM** [[path|plan]] \`opus-4(200k)\`
+>   First entry.
+>   #tag1
 
-### My Plan
-
-| | |
-|---|---|
-| [[path|10:30 AM]] | First entry |
-
-### Other Plan
-
-| | |
-|---|---|
-| [[path|11:00 AM]] | Other entry |
+> [!plan]+ Other Plan
+> \`project\` \u00b7 \`plan-mode\`
+>
+> - **11:00 AM** [[path|plan]] \`opus-4(200k)\`
+>   Other entry.
 `,
     );
 
-    const result = await shared.appendRowToJournalSection(
-      "My Plan",
-      "| [[new|2:00 PM]] | New row |",
-      journalFile,
-    );
+    const revision = `> - **2:00 PM** [[new|done]] \`opus-4(200k)\`
+>   New revision.
+>   #tag2`;
+
+    const result = await shared.appendRevisionToCallout("My Plan", revision, journalFile);
     expect(result).toBe(true);
 
     const content = await Bun.file(journalFile).text();
     const lines = content.split("\n");
     const firstEntryIdx = lines.findIndex((l) => l.includes("First entry"));
-    const newRowIdx = lines.findIndex((l) => l.includes("New row"));
-    const otherIdx = lines.findIndex((l) => l.includes("### Other Plan"));
+    const newRevIdx = lines.findIndex((l) => l.includes("New revision"));
+    const otherIdx = lines.findIndex((l) => l.includes("> [!plan]+ Other Plan"));
 
-    expect(newRowIdx).toBeGreaterThan(firstEntryIdx);
-    expect(newRowIdx).toBeLessThan(otherIdx);
+    expect(newRevIdx).toBeGreaterThan(firstEntryIdx);
+    expect(newRevIdx).toBeLessThan(otherIdx);
   });
 
-  it("returns false when header not found", async () => {
+  it("returns false when callout header not found", async () => {
     const journalFile = join(tempDir, "journal.md");
     await Bun.write(journalFile, "## Other Content\n\nSome text\n");
 
-    const result = await shared.appendRowToJournalSection("Missing Plan", "| row |", journalFile);
-    expect(result).toBe(false);
-  });
-
-  it("returns false when no table rows exist under header", async () => {
-    const journalFile = join(tempDir, "journal.md");
-    await Bun.write(journalFile, "### My Plan\n\nJust text, no table.\n");
-
-    const result = await shared.appendRowToJournalSection("My Plan", "| row |", journalFile);
+    const result = await shared.appendRevisionToCallout(
+      "Missing Plan",
+      "> - **2:00 PM** [[p|plan]]",
+      journalFile,
+    );
     expect(result).toBe(false);
   });
 
   it("returns false when file does not exist", async () => {
-    const result = await shared.appendRowToJournalSection(
+    const result = await shared.appendRevisionToCallout(
       "My Plan",
-      "| row |",
+      "> - **2:00 PM** [[p|plan]]",
       join(tempDir, "nonexistent.md"),
     );
     expect(result).toBe(false);
   });
 
-  it("handles section at end of file", async () => {
+  it("handles callout at end of file", async () => {
     const journalFile = join(tempDir, "journal.md");
     await Bun.write(
       journalFile,
-      `### My Plan
-
-| | |
-|---|---|
-| [[path|10:30 AM]] | First entry |
+      `> [!plan]+ My Plan
+> \`project\` \u00b7 \`plan-mode\`
+>
+> - **10:30 AM** [[path|plan]] \`opus-4(200k)\`
+>   First entry.
 `,
     );
 
-    const result = await shared.appendRowToJournalSection(
-      "My Plan",
-      "| [[new|2:00 PM]] | Second entry |",
-      journalFile,
-    );
+    const revision = `> - **2:00 PM** [[new|done]] \`opus-4(200k)\`
+>   Second entry.`;
+
+    const result = await shared.appendRevisionToCallout("My Plan", revision, journalFile);
     expect(result).toBe(true);
 
     const content = await Bun.file(journalFile).text();
@@ -397,29 +391,31 @@ describe("appendRowToJournalSection", () => {
     expect(content.indexOf("Second entry")).toBeGreaterThan(content.indexOf("First entry"));
   });
 
-  it("skips table separator rows when finding last table row", async () => {
+  it("inserts revision after multi-line callout content", async () => {
     const journalFile = join(tempDir, "journal.md");
     await Bun.write(
       journalFile,
-      `### My Plan
-
-| | |
-|---|---|
-| [[path|10:30 AM]] | Only entry |
+      `> [!plan]+ My Plan
+> \`project\` \u00b7 \`plan-mode\`
+>
+> - **10:30 AM** [[path|plan]] \`opus-4(200k)\`
+>   Only entry.
+>   #tag1 #tag2
 `,
     );
 
-    const result = await shared.appendRowToJournalSection(
-      "My Plan",
-      "| [[new|2:00 PM]] | New entry |",
-      journalFile,
-    );
+    const revision = `> - **2:00 PM** [[new|done]] \`opus-4(200k)\`
+>   New entry.`;
+
+    const result = await shared.appendRevisionToCallout("My Plan", revision, journalFile);
     expect(result).toBe(true);
 
     const content = await Bun.file(journalFile).text();
     const lines = content.split("\n");
-    const onlyIdx = lines.findIndex((l) => l.includes("Only entry"));
+    const tagIdx = lines.findIndex((l) => l.includes("#tag1 #tag2"));
+    const bulletIdx = lines.findIndex((l) => l.includes("2:00 PM"));
     const newIdx = lines.findIndex((l) => l.includes("New entry"));
-    expect(newIdx).toBe(onlyIdx + 1);
+    expect(bulletIdx).toBe(tagIdx + 1);
+    expect(newIdx).toBe(tagIdx + 2);
   });
 });
