@@ -1,6 +1,15 @@
 // migration.ts — Vault layout detection and migration utilities
 
-import { mkdirSync, readdirSync, renameSync, rmdirSync, statSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { type DateScheme, formatDatePath, getDatePartsFor } from "./dates.ts";
 
@@ -331,13 +340,30 @@ function collectJournalMovesUnderYear(
   }
 }
 
-/** Execute a list of moves, creating target directories as needed. Returns count of moves executed. */
+/** Execute a list of moves, creating target directories as needed. Returns count of moves executed.
+ *  When the target already exists, plan directories are merged (source entries that
+ *  don't exist in the target are copied over) and journal files are skipped. */
 export function executeMoves(moves: MoveEntry[]): number {
   let count = 0;
   for (const move of moves) {
     if (move.from === move.to) continue;
     mkdirSync(dirname(move.to), { recursive: true });
-    renameSync(move.from, move.to);
+
+    if (existsSync(move.to)) {
+      if (move.type === "plan-dir") {
+        for (const entry of readdirSync(move.from)) {
+          const src = join(move.from, entry);
+          const dest = join(move.to, entry);
+          if (!existsSync(dest)) {
+            cpSync(src, dest, { recursive: true });
+          }
+        }
+        rmSync(move.from, { recursive: true });
+      }
+      // journal-file: target is newer — skip, cleanEmptyDirs handles the rest
+    } else {
+      renameSync(move.from, move.to);
+    }
     count++;
   }
   return count;
