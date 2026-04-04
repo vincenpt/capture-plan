@@ -1,36 +1,37 @@
 // migration.ts — Vault layout detection and migration utilities
 
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  renameSync,
-  rmdirSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type DateScheme, formatDatePath, getDatePartsFor } from "./dates.ts";
+import {
+  COMPACT_DATE_PATTERN,
+  DAY_ONLY_PATTERN,
+  FLAT_DATE_PATTERN,
+  NUM_NAME_PATTERN,
+  PLAN_DIR_PATTERN,
+  YEAR_PATTERN,
+} from "./fs.ts";
 
-const YEAR_PATTERN = /^\d{4}$/;
-const PLAN_DIR_PATTERN = /^(\d{3,})-(.+)$/;
+/** Convert a date path from one scheme to another. Returns the new path segment, or null on parse failure. */
+function remapDatePath(
+  fromScheme: DateScheme,
+  year: string,
+  segments: string[],
+  toScheme: DateScheme,
+): string | null {
+  const date = parseDateFromPath(fromScheme, year, segments);
+  if (!date) return null;
+  return formatDatePath(toScheme, getDatePartsFor(date));
+}
 
 /** Classify a directory entry under a year dir into its date scheme. */
 export function classifyDateEntry(entry: string, children?: string[]): DateScheme | undefined {
-  // flat: yyyy-mm-dd (entry IS the flat date, lives at base level, but we're under year)
-  // — flat entries are yyyy-mm-dd and live directly under the base, not under year dirs
-  // So if we're scanning under a year dir, flat doesn't apply here.
+  if (COMPACT_DATE_PATTERN.test(entry)) return "compact";
 
-  // compact: mm-dd
-  if (/^\d{2}-\d{2}$/.test(entry)) return "compact";
-
-  // calendar or monthly: mm-MonthName
-  if (/^\d{2}-[A-Z][a-z]+$/.test(entry) && children) {
-    // Check children to distinguish calendar (dd-DayName) from monthly (dd)
+  if (NUM_NAME_PATTERN.test(entry) && children) {
     for (const child of children) {
-      if (/^\d{2}-[A-Z][a-z]+$/.test(child)) return "calendar";
-      if (/^\d{2}$/.test(child)) return "monthly";
+      if (NUM_NAME_PATTERN.test(child)) return "calendar";
+      if (DAY_ONLY_PATTERN.test(child)) return "monthly";
     }
   }
 
@@ -41,45 +42,40 @@ export function classifyDateEntry(entry: string, children?: string[]): DateSchem
 export function detectVaultSchemes(basePath: string): Set<DateScheme> {
   const schemes = new Set<DateScheme>();
 
-  // Check for flat entries (yyyy-mm-dd) directly under base path
+  let entries: import("node:fs").Dirent[];
   try {
-    for (const entry of readdirSync(basePath)) {
-      if (/^\d{4}-\d{2}-\d{2}$/.test(entry)) {
-        const fullPath = join(basePath, entry);
-        if (isDir(fullPath)) {
-          schemes.add("flat");
-          break;
-        }
-      }
-    }
+    entries = readdirSync(basePath, { withFileTypes: true });
   } catch {
-    /* base path doesn't exist */
+    return schemes;
   }
 
-  // Check under year directories
-  try {
-    for (const yearEntry of readdirSync(basePath)) {
-      if (!YEAR_PATTERN.test(yearEntry)) continue;
-      const yearPath = join(basePath, yearEntry);
-      if (!isDir(yearPath)) continue;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
 
-      for (const dateEntry of readdirSync(yearPath)) {
-        const datePath = join(yearPath, dateEntry);
-        if (!isDir(datePath)) continue;
-
-        let children: string[] | undefined;
-        try {
-          children = readdirSync(datePath).filter((c) => isDir(join(datePath, c)));
-        } catch {
-          /* skip */
-        }
-
-        const scheme = classifyDateEntry(dateEntry, children);
-        if (scheme) schemes.add(scheme);
-      }
+    if (FLAT_DATE_PATTERN.test(entry.name)) {
+      schemes.add("flat");
+      continue;
     }
-  } catch {
-    /* base path doesn't exist */
+
+    if (!YEAR_PATTERN.test(entry.name)) continue;
+    const yearPath = join(basePath, entry.name);
+
+    for (const dateEntry of readdirSync(yearPath, { withFileTypes: true })) {
+      if (!dateEntry.isDirectory()) continue;
+      const datePath = join(yearPath, dateEntry.name);
+
+      let children: string[] | undefined;
+      try {
+        children = readdirSync(datePath, { withFileTypes: true })
+          .filter((c) => c.isDirectory())
+          .map((c) => c.name);
+      } catch {
+        /* skip */
+      }
+
+      const scheme = classifyDateEntry(dateEntry.name, children);
+      if (scheme) schemes.add(scheme);
+    }
   }
 
   return schemes;
@@ -93,7 +89,6 @@ export function parseDateFromPath(
   segments: string[],
 ): Date | null {
   try {
-    // Flat scheme embeds the full date in segments[0]
     if (scheme === "flat") {
       const parts = segments[0].split("-").map(Number);
       return new Date(parts[0], parts[1] - 1, parts[2], 12, 0);
@@ -102,18 +97,15 @@ export function parseDateFromPath(
     const y = parseInt(year, 10);
     switch (scheme) {
       case "compact": {
-        // segments[0] = "mm-dd"
         const [mm, dd] = segments[0].split("-").map(Number);
         return new Date(y, mm - 1, dd, 12, 0);
       }
       case "calendar": {
-        // segments[0] = "mm-MonthName", segments[1] = "dd-DayName"
         const mm = parseInt(segments[0].split("-")[0], 10);
         const dd = parseInt(segments[1].split("-")[0], 10);
         return new Date(y, mm - 1, dd, 12, 0);
       }
       case "monthly": {
-        // segments[0] = "mm-MonthName", segments[1] = "dd"
         const mm = parseInt(segments[0].split("-")[0], 10);
         const dd = parseInt(segments[1], 10);
         return new Date(y, mm - 1, dd, 12, 0);
@@ -141,25 +133,21 @@ export function computePlanMoves(
   if (fromScheme === toScheme) return moves;
 
   if (fromScheme === "flat") {
-    // Flat entries are directly under basePath
     try {
-      for (const entry of readdirSync(basePath)) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(entry)) continue;
-        const entryPath = join(basePath, entry);
-        if (!isDir(entryPath)) continue;
+      for (const entry of readdirSync(basePath, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !FLAT_DATE_PATTERN.test(entry.name)) continue;
+        const entryPath = join(basePath, entry.name);
 
-        const date = parseDateFromPath("flat", "", [entry]);
-        if (!date) continue;
-        const parts = getDatePartsFor(date);
-        const targetSeg = formatDatePath(toScheme, parts);
+        const targetSeg = remapDatePath("flat", "", [entry.name], toScheme);
+        if (!targetSeg) continue;
         const targetPath = join(basePath, targetSeg);
 
-        for (const planEntry of readdirSync(entryPath)) {
-          if (isHidden(planEntry)) continue;
+        for (const planEntry of readdirSync(entryPath, { withFileTypes: true })) {
+          if (planEntry.name.startsWith(".")) continue;
           moves.push({
-            from: join(entryPath, planEntry),
-            to: join(targetPath, planEntry),
-            type: PLAN_DIR_PATTERN.test(planEntry) ? "plan-dir" : "loose",
+            from: join(entryPath, planEntry.name),
+            to: join(targetPath, planEntry.name),
+            type: PLAN_DIR_PATTERN.test(planEntry.name) ? "plan-dir" : "loose",
           });
         }
       }
@@ -169,14 +157,12 @@ export function computePlanMoves(
     return moves;
   }
 
-  // Non-flat: entries are under year dirs
   try {
-    for (const yearEntry of readdirSync(basePath)) {
-      if (!YEAR_PATTERN.test(yearEntry)) continue;
-      const yearPath = join(basePath, yearEntry);
-      if (!isDir(yearPath)) continue;
+    for (const yearEntry of readdirSync(basePath, { withFileTypes: true })) {
+      if (!yearEntry.isDirectory() || !YEAR_PATTERN.test(yearEntry.name)) continue;
+      const yearPath = join(basePath, yearEntry.name);
 
-      collectPlanMovesUnderYear(yearPath, yearEntry, fromScheme, toScheme, basePath, moves);
+      collectPlanMovesUnderYear(yearPath, yearEntry.name, fromScheme, toScheme, basePath, moves);
     }
   } catch {
     /* skip */
@@ -193,47 +179,48 @@ function collectPlanMovesUnderYear(
   basePath: string,
   moves: MoveEntry[],
 ): void {
-  for (const dateEntry of readdirSync(yearPath)) {
-    const datePath = join(yearPath, dateEntry);
-    if (!isDir(datePath)) continue;
+  for (const dateEntry of readdirSync(yearPath, { withFileTypes: true })) {
+    if (!dateEntry.isDirectory()) continue;
+    const datePath = join(yearPath, dateEntry.name);
 
-    if (fromScheme === "compact" && /^\d{2}-\d{2}$/.test(dateEntry)) {
-      const date = parseDateFromPath("compact", year, [dateEntry]);
-      if (!date) continue;
-      const parts = getDatePartsFor(date);
-      const targetSeg = formatDatePath(toScheme, parts);
+    if (fromScheme === "compact" && COMPACT_DATE_PATTERN.test(dateEntry.name)) {
+      const targetSeg = remapDatePath("compact", year, [dateEntry.name], toScheme);
+      if (!targetSeg) continue;
 
-      for (const planEntry of readdirSync(datePath)) {
-        if (isHidden(planEntry)) continue;
+      for (const planEntry of readdirSync(datePath, { withFileTypes: true })) {
+        if (planEntry.name.startsWith(".")) continue;
         moves.push({
-          from: join(datePath, planEntry),
-          to: join(basePath, targetSeg, planEntry),
-          type: PLAN_DIR_PATTERN.test(planEntry) ? "plan-dir" : "loose",
+          from: join(datePath, planEntry.name),
+          to: join(basePath, targetSeg, planEntry.name),
+          type: PLAN_DIR_PATTERN.test(planEntry.name) ? "plan-dir" : "loose",
         });
       }
     } else if (
       (fromScheme === "calendar" || fromScheme === "monthly") &&
-      /^\d{2}-[A-Z][a-z]+$/.test(dateEntry)
+      NUM_NAME_PATTERN.test(dateEntry.name)
     ) {
-      for (const dayEntry of readdirSync(datePath)) {
-        const dayPath = join(datePath, dayEntry);
-        if (!isDir(dayPath)) continue;
+      for (const dayEntry of readdirSync(datePath, { withFileTypes: true })) {
+        if (!dayEntry.isDirectory()) continue;
 
-        const isCalendar = /^\d{2}-[A-Z][a-z]+$/.test(dayEntry);
-        const isMonthly = /^\d{2}$/.test(dayEntry);
+        const isCalendar = NUM_NAME_PATTERN.test(dayEntry.name);
+        const isMonthly = DAY_ONLY_PATTERN.test(dayEntry.name);
 
         if ((fromScheme === "calendar" && isCalendar) || (fromScheme === "monthly" && isMonthly)) {
-          const date = parseDateFromPath(fromScheme, year, [dateEntry, dayEntry]);
-          if (!date) continue;
-          const parts = getDatePartsFor(date);
-          const targetSeg = formatDatePath(toScheme, parts);
+          const targetSeg = remapDatePath(
+            fromScheme,
+            year,
+            [dateEntry.name, dayEntry.name],
+            toScheme,
+          );
+          if (!targetSeg) continue;
+          const dayPath = join(datePath, dayEntry.name);
 
-          for (const planEntry of readdirSync(dayPath)) {
-            if (isHidden(planEntry)) continue;
+          for (const planEntry of readdirSync(dayPath, { withFileTypes: true })) {
+            if (planEntry.name.startsWith(".")) continue;
             moves.push({
-              from: join(dayPath, planEntry),
-              to: join(basePath, targetSeg, planEntry),
-              type: PLAN_DIR_PATTERN.test(planEntry) ? "plan-dir" : "loose",
+              from: join(dayPath, planEntry.name),
+              to: join(basePath, targetSeg, planEntry.name),
+              type: PLAN_DIR_PATTERN.test(planEntry.name) ? "plan-dir" : "loose",
             });
           }
         }
@@ -255,10 +242,8 @@ export function computeJournalMoves(
     try {
       for (const entry of readdirSync(basePath)) {
         if (!/^\d{4}-\d{2}-\d{2}\.md$/.test(entry)) continue;
-        const date = parseDateFromPath("flat", "", [entry.replace(/\.md$/, "")]);
-        if (!date) continue;
-        const parts = getDatePartsFor(date);
-        const targetSeg = formatDatePath(toScheme, parts);
+        const targetSeg = remapDatePath("flat", "", [entry.replace(/\.md$/, "")], toScheme);
+        if (!targetSeg) continue;
         moves.push({
           from: join(basePath, entry),
           to: `${join(basePath, targetSeg)}.md`,
@@ -272,12 +257,11 @@ export function computeJournalMoves(
   }
 
   try {
-    for (const yearEntry of readdirSync(basePath)) {
-      if (!YEAR_PATTERN.test(yearEntry)) continue;
-      const yearPath = join(basePath, yearEntry);
-      if (!isDir(yearPath)) continue;
+    for (const yearEntry of readdirSync(basePath, { withFileTypes: true })) {
+      if (!yearEntry.isDirectory() || !YEAR_PATTERN.test(yearEntry.name)) continue;
+      const yearPath = join(basePath, yearEntry.name);
 
-      collectJournalMovesUnderYear(yearPath, yearEntry, fromScheme, toScheme, basePath, moves);
+      collectJournalMovesUnderYear(yearPath, yearEntry.name, fromScheme, toScheme, basePath, moves);
     }
   } catch {
     /* skip */
@@ -294,40 +278,41 @@ function collectJournalMovesUnderYear(
   basePath: string,
   moves: MoveEntry[],
 ): void {
-  for (const entry of readdirSync(yearPath)) {
-    const entryPath = join(yearPath, entry);
-
-    if (fromScheme === "compact" && /^\d{2}-\d{2}\.md$/.test(entry)) {
-      // compact journal: yyyy/mm-dd.md
-      const date = parseDateFromPath("compact", year, [entry.replace(/\.md$/, "")]);
-      if (!date) continue;
-      const parts = getDatePartsFor(date);
-      const targetSeg = formatDatePath(toScheme, parts);
+  for (const entry of readdirSync(yearPath, { withFileTypes: true })) {
+    if (fromScheme === "compact" && !entry.isDirectory() && /^\d{2}-\d{2}\.md$/.test(entry.name)) {
+      const targetSeg = remapDatePath("compact", year, [entry.name.replace(/\.md$/, "")], toScheme);
+      if (!targetSeg) continue;
       moves.push({
-        from: entryPath,
+        from: join(yearPath, entry.name),
         to: `${join(basePath, targetSeg)}.md`,
         type: "journal-file",
       });
-    } else if (/^\d{2}-[A-Z][a-z]+$/.test(entry) && isDir(entryPath)) {
-      // calendar or monthly: yyyy/mm-MonthName/...
+    } else if (NUM_NAME_PATTERN.test(entry.name) && entry.isDirectory()) {
+      const entryPath = join(yearPath, entry.name);
       for (const dayEntry of readdirSync(entryPath)) {
         const dayPath = join(entryPath, dayEntry);
 
         if (fromScheme === "calendar" && /^\d{2}-[A-Z][a-z]+\.md$/.test(dayEntry)) {
-          const date = parseDateFromPath("calendar", year, [entry, dayEntry.replace(/\.md$/, "")]);
-          if (!date) continue;
-          const parts = getDatePartsFor(date);
-          const targetSeg = formatDatePath(toScheme, parts);
+          const targetSeg = remapDatePath(
+            "calendar",
+            year,
+            [entry.name, dayEntry.replace(/\.md$/, "")],
+            toScheme,
+          );
+          if (!targetSeg) continue;
           moves.push({
             from: dayPath,
             to: `${join(basePath, targetSeg)}.md`,
             type: "journal-file",
           });
         } else if (fromScheme === "monthly" && /^\d{2}\.md$/.test(dayEntry)) {
-          const date = parseDateFromPath("monthly", year, [entry, dayEntry.replace(/\.md$/, "")]);
-          if (!date) continue;
-          const parts = getDatePartsFor(date);
-          const targetSeg = formatDatePath(toScheme, parts);
+          const targetSeg = remapDatePath(
+            "monthly",
+            year,
+            [entry.name, dayEntry.replace(/\.md$/, "")],
+            toScheme,
+          );
+          if (!targetSeg) continue;
           moves.push({
             from: dayPath,
             to: `${join(basePath, targetSeg)}.md`,
@@ -392,16 +377,4 @@ export function cleanEmptyDirs(paths: string[], stopAt: string): number {
     }
   }
   return removed;
-}
-
-function isDir(p: string): boolean {
-  try {
-    return statSync(p).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-function isHidden(name: string): boolean {
-  return name.startsWith(".");
 }

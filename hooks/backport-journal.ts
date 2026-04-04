@@ -2,7 +2,7 @@
 // backport-journal.ts — Import plans from ~/.claude/plans/ into Obsidian vault + journal
 // CLI script (not a hook). Run via: bun hooks/backport-journal.ts [options]
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,7 @@ import {
   type Config,
   createVaultNote,
   extractTitle,
+  FLAT_DATE_PATTERN,
   formatTagsYaml,
   getDatePartsFor,
   getJournalPathForDate,
@@ -17,14 +18,18 @@ import {
   getProjectLabel,
   getProjectName,
   getVaultPath,
+  isDir,
   loadConfig,
   mergeTagsOnDailyNote,
   nextCounter,
+  PLAN_DIR_PATTERN,
   padCounter,
   parsePlanFrontmatter,
+  safeReaddir,
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
+  YEAR_PATTERN,
 } from "./shared.ts";
 
 /** Metadata for a plan file discovered in ~/.claude/plans/, including import status. */
@@ -127,24 +132,19 @@ export function buildSlugProjectMap(): Map<string, string> {
   return map;
 }
 
-const PLAN_DIR_PATTERN = /^(\d{3,})-(.+)$/;
-const YEAR_DIR_PATTERN = /^\d{4}$/;
-const FLAT_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
 /** Recursively find all NNN-slug plan directories under a given path, regardless of date scheme. */
-function findPlanDirs(dirPath: string, depth: number): string[] {
-  if (depth > 4) return [];
-  const result: string[] = [];
+function findPlanDirs(dirPath: string, depth: number, acc: string[] = []): string[] {
+  if (depth > 4) return acc;
   for (const entry of safeReaddir(dirPath)) {
     const fullPath = join(dirPath, entry);
     if (!isDir(fullPath)) continue;
     if (PLAN_DIR_PATTERN.test(entry)) {
-      result.push(fullPath);
+      acc.push(fullPath);
     } else {
-      result.push(...findPlanDirs(fullPath, depth + 1));
+      findPlanDirs(fullPath, depth + 1, acc);
     }
   }
-  return result;
+  return acc;
 }
 
 /** Extract source_slug from plan.md files in the given plan directories. */
@@ -178,18 +178,14 @@ export function getImportedSlugs(vaultPath: string, planPathRelative: string): S
     }
 
     // Other schemes: year directories containing date subdirs
-    if (!YEAR_DIR_PATTERN.test(entry)) continue;
+    if (!YEAR_PATTERN.test(entry)) continue;
     collectSlugsFromPlanDirs(findPlanDirs(entryPath, 0), imported);
   }
   return imported;
 }
 
 /** Discover all plan files in ~/.claude/plans/, resolving their project and import status. */
-export function discoverPlans(
-  vaultPath: string,
-  planPathRelative: string,
-  _config: Config,
-): PlanInfo[] {
+export function discoverPlans(vaultPath: string, planPathRelative: string): PlanInfo[] {
   const slugProjectMap = buildSlugProjectMap();
   const importedSlugs = getImportedSlugs(vaultPath, planPathRelative);
 
@@ -367,22 +363,6 @@ ${stripTitleLine(content)}
   return result;
 }
 
-function safeReaddir(path: string): string[] {
-  try {
-    return readdirSync(path);
-  } catch {
-    return [];
-  }
-}
-
-function isDir(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const config = await loadConfig(args.cwd);
@@ -395,7 +375,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const plans = discoverPlans(vaultPath, config.plan.path, config);
+  const plans = discoverPlans(vaultPath, config.plan.path);
 
   if (args.list) {
     const filtered = filterPlans(plans, args);

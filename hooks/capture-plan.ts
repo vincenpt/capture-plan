@@ -160,26 +160,6 @@ async function main(): Promise<void> {
     }
 
     const vaultPath = getVaultPath(config.vault);
-
-    // Detect scheme mismatch — warn if vault has dirs in a different layout
-    if (vaultPath) {
-      try {
-        const { detectVaultSchemes } = await import("./lib/migration.ts");
-        const onDisk = detectVaultSchemes(join(vaultPath, config.plan.path));
-        for (const detected of onDisk) {
-          if (detected !== config.plan.date_scheme) {
-            debugLog(
-              `Layout mismatch: vault has '${detected}' dirs but config uses '${config.plan.date_scheme}'. Run /capture-plan:migrate-layout to migrate.\n`,
-              DEBUG_LOG,
-            );
-            break;
-          }
-        }
-      } catch {
-        /* detection is advisory, never block */
-      }
-    }
-
     const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null;
     const counter = dateDirAbsolute ? nextCounter(dateDirAbsolute) : 1;
     const { summary, tags: newTags } = await summarizeWithClaude(planContent, PLAN_SYSTEM_PROMPT);
