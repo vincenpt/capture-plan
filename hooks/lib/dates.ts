@@ -1,5 +1,11 @@
 // dates.ts — Date/time helpers
 
+/** Named date directory schemes for vault path construction. */
+export type DateScheme = "calendar" | "compact" | "monthly" | "flat";
+
+/** All valid DateScheme values, for runtime validation. */
+export const DATE_SCHEMES: readonly DateScheme[] = ["calendar", "compact", "monthly", "flat"];
+
 /** Structured date/time components used for building vault paths and frontmatter. */
 export type DateParts = {
   dd: string;
@@ -49,6 +55,29 @@ export function getDatePartsFor(date: Date): DateParts {
 /** Extract date/time components for the current moment. */
 export function getDateParts(): DateParts {
   return getDatePartsFor(new Date());
+}
+
+/** Format the date segment of a vault path according to the given scheme. */
+export function formatDatePath(scheme: DateScheme, parts: DateParts): string {
+  switch (scheme) {
+    case "calendar":
+      return `${parts.yyyy}/${parts.mm}-${parts.monthName}/${parts.dd}-${parts.dayName}`;
+    case "compact":
+      return `${parts.yyyy}/${parts.mm}-${parts.dd}`;
+    case "monthly":
+      return `${parts.yyyy}/${parts.mm}-${parts.monthName}/${parts.dd}`;
+    case "flat":
+      return `${parts.yyyy}-${parts.mm}-${parts.dd}`;
+  }
+}
+
+/** Detect which DateScheme produced a given date directory path segment. */
+export function detectDateScheme(dateSegment: string): DateScheme | undefined {
+  if (/^\d{4}\/\d{2}-[A-Z][a-z]+\/\d{2}-[A-Z][a-z]+$/.test(dateSegment)) return "calendar";
+  if (/^\d{4}\/\d{2}-[A-Z][a-z]+\/\d{2}$/.test(dateSegment)) return "monthly";
+  if (/^\d{4}\/\d{2}-\d{2}$/.test(dateSegment)) return "compact";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateSegment)) return "flat";
+  return undefined;
 }
 
 /** Format a millisecond duration as a human-readable string (e.g. "3m 12s", "1h 5m"). */

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import { formatAmPm, formatDuration, getDatePartsFor, getJournalPathForDate } from "../shared.ts";
+import {
+  detectDateScheme,
+  formatAmPm,
+  formatDatePath,
+  formatDuration,
+  getDatePartsFor,
+  getJournalPathForDate,
+  getPlanDatePath,
+} from "../shared.ts";
 
 describe("formatAmPm", () => {
   it("formats midnight as 12:00 AM", () => {
@@ -64,7 +72,10 @@ describe("getDatePartsFor", () => {
 });
 
 describe("getJournalPathForDate", () => {
-  const config = { plan_path: "Claude/Plans", journal_path: "Journal" };
+  const config = {
+    plan: { path: "Claude/Plans", date_scheme: "calendar" as const },
+    journal: { path: "Journal", date_scheme: "calendar" as const },
+  };
 
   it("builds correct path for a known date", () => {
     // March 29, 2026 is a Sunday
@@ -78,10 +89,103 @@ describe("getJournalPathForDate", () => {
     expect(getJournalPathForDate(config, date)).toBe("Journal/2026/01-January/01-Thursday");
   });
 
-  it("uses custom journal_path from config", () => {
-    const customConfig = { plan_path: "Claude/Plans", journal_path: "MyJournal" };
+  it("uses custom journal path from config", () => {
+    const customConfig = {
+      plan: { path: "Claude/Plans", date_scheme: "calendar" as const },
+      journal: { path: "MyJournal", date_scheme: "calendar" as const },
+    };
     const date = new Date(2026, 2, 29, 14, 30);
     expect(getJournalPathForDate(customConfig, date)).toBe("MyJournal/2026/03-March/29-Sunday");
+  });
+});
+
+describe("formatDatePath", () => {
+  const date = new Date(2026, 3, 3, 14, 30); // April 3, 2026 is a Friday
+  const parts = getDatePartsFor(date);
+
+  it("formats calendar scheme", () => {
+    expect(formatDatePath("calendar", parts)).toBe("2026/04-April/03-Friday");
+  });
+
+  it("formats compact scheme", () => {
+    expect(formatDatePath("compact", parts)).toBe("2026/04-03");
+  });
+
+  it("formats monthly scheme", () => {
+    expect(formatDatePath("monthly", parts)).toBe("2026/04-April/03");
+  });
+
+  it("formats flat scheme", () => {
+    expect(formatDatePath("flat", parts)).toBe("2026-04-03");
+  });
+
+  it("pads single-digit months and days", () => {
+    const jan1 = getDatePartsFor(new Date(2026, 0, 5, 12, 0)); // Jan 5
+    expect(formatDatePath("compact", jan1)).toBe("2026/01-05");
+    expect(formatDatePath("calendar", jan1)).toBe("2026/01-January/05-Monday");
+  });
+});
+
+describe("detectDateScheme", () => {
+  it("detects calendar scheme", () => {
+    expect(detectDateScheme("2026/04-April/03-Friday")).toBe("calendar");
+  });
+
+  it("detects compact scheme", () => {
+    expect(detectDateScheme("2026/04-03")).toBe("compact");
+  });
+
+  it("detects monthly scheme", () => {
+    expect(detectDateScheme("2026/04-April/03")).toBe("monthly");
+  });
+
+  it("detects flat scheme", () => {
+    expect(detectDateScheme("2026-04-03")).toBe("flat");
+  });
+
+  it("returns undefined for unrecognized patterns", () => {
+    expect(detectDateScheme("random/path")).toBeUndefined();
+    expect(detectDateScheme("")).toBeUndefined();
+  });
+});
+
+describe("getPlanDatePath", () => {
+  it("combines plan path with formatted date using configured scheme", () => {
+    const config = {
+      plan: { path: "Claude/Plans", date_scheme: "calendar" as const },
+      journal: { path: "Journal", date_scheme: "calendar" as const },
+    };
+    const parts = getDatePartsFor(new Date(2026, 3, 3, 14, 30));
+    expect(getPlanDatePath(config, parts)).toBe("Claude/Plans/2026/04-April/03-Friday");
+  });
+
+  it("uses compact scheme when configured", () => {
+    const config = {
+      plan: { path: "Plans", date_scheme: "compact" as const },
+      journal: { path: "Journal", date_scheme: "calendar" as const },
+    };
+    const parts = getDatePartsFor(new Date(2026, 3, 3, 14, 30));
+    expect(getPlanDatePath(config, parts)).toBe("Plans/2026/04-03");
+  });
+});
+
+describe("getJournalPathForDate with different schemes", () => {
+  it("uses compact scheme for journal", () => {
+    const config = {
+      plan: { path: "Claude/Plans", date_scheme: "calendar" as const },
+      journal: { path: "Journal", date_scheme: "compact" as const },
+    };
+    const date = new Date(2026, 2, 29, 14, 30);
+    expect(getJournalPathForDate(config, date)).toBe("Journal/2026/03-29");
+  });
+
+  it("uses flat scheme for journal", () => {
+    const config = {
+      plan: { path: "Claude/Plans", date_scheme: "calendar" as const },
+      journal: { path: "Journal", date_scheme: "flat" as const },
+    };
+    const date = new Date(2026, 2, 29, 14, 30);
+    expect(getJournalPathForDate(config, date)).toBe("Journal/2026-03-29");
   });
 });
 

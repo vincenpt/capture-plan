@@ -24,8 +24,8 @@ let projectsDir: string;
 
 const TEST_CONFIG: Config = {
   vault: "TestVault",
-  plan_path: "Claude/Plans",
-  journal_path: "Journal",
+  plan: { path: "Claude/Plans", date_scheme: "calendar" },
+  journal: { path: "Journal", date_scheme: "calendar" },
 };
 
 function makePlanFile(slug: string, content: string): string {

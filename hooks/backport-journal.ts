@@ -13,6 +13,7 @@ import {
   formatTagsYaml,
   getDatePartsFor,
   getJournalPathForDate,
+  getPlanDatePath,
   getProjectLabel,
   getProjectName,
   getVaultPath,
@@ -127,8 +128,38 @@ export function buildSlugProjectMap(): Map<string, string> {
 }
 
 const PLAN_DIR_PATTERN = /^(\d{3,})-(.+)$/;
-const DATE_DIR_PATTERN = /^(\d{2})-(\d{2})$/;
 const YEAR_DIR_PATTERN = /^\d{4}$/;
+const FLAT_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Recursively find all NNN-slug plan directories under a given path, regardless of date scheme. */
+function findPlanDirs(dirPath: string, depth: number): string[] {
+  if (depth > 4) return [];
+  const result: string[] = [];
+  for (const entry of safeReaddir(dirPath)) {
+    const fullPath = join(dirPath, entry);
+    if (!isDir(fullPath)) continue;
+    if (PLAN_DIR_PATTERN.test(entry)) {
+      result.push(fullPath);
+    } else {
+      result.push(...findPlanDirs(fullPath, depth + 1));
+    }
+  }
+  return result;
+}
+
+/** Extract source_slug from plan.md files in the given plan directories. */
+function collectSlugsFromPlanDirs(planDirs: string[], imported: Set<string>): void {
+  for (const planDirPath of planDirs) {
+    const planFile = join(planDirPath, "plan.md");
+    try {
+      const content = readFileSync(planFile, "utf-8");
+      const fm = parsePlanFrontmatter(content);
+      if (fm.source_slug) imported.add(fm.source_slug);
+    } catch {
+      /* skip */
+    }
+  }
+}
 
 /** Scan existing vault plan notes to collect source_slug values, used to deduplicate imports. */
 export function getImportedSlugs(vaultPath: string, planPathRelative: string): Set<string> {
@@ -136,26 +167,19 @@ export function getImportedSlugs(vaultPath: string, planPathRelative: string): S
   const basePath = join(vaultPath, planPathRelative);
   if (!existsSync(basePath)) return imported;
 
-  for (const yearEntry of safeReaddir(basePath)) {
-    if (!YEAR_DIR_PATTERN.test(yearEntry)) continue;
-    const yearPath = join(basePath, yearEntry);
-    if (!isDir(yearPath)) continue;
-    for (const dateEntry of safeReaddir(yearPath)) {
-      if (!DATE_DIR_PATTERN.test(dateEntry)) continue;
-      const datePath = join(yearPath, dateEntry);
-      if (!isDir(datePath)) continue;
-      for (const planEntry of safeReaddir(datePath)) {
-        if (!PLAN_DIR_PATTERN.test(planEntry)) continue;
-        const planFile = join(datePath, planEntry, "plan.md");
-        try {
-          const content = readFileSync(planFile, "utf-8");
-          const fm = parsePlanFrontmatter(content);
-          if (fm.source_slug) imported.add(fm.source_slug);
-        } catch {
-          /* skip */
-        }
-      }
+  for (const entry of safeReaddir(basePath)) {
+    const entryPath = join(basePath, entry);
+    if (!isDir(entryPath)) continue;
+
+    // Flat scheme: yyyy-mm-dd directories directly under base path
+    if (FLAT_DATE_PATTERN.test(entry)) {
+      collectSlugsFromPlanDirs(findPlanDirs(entryPath, 0), imported);
+      continue;
     }
+
+    // Other schemes: year directories containing date subdirs
+    if (!YEAR_DIR_PATTERN.test(entry)) continue;
+    collectSlugsFromPlanDirs(findPlanDirs(entryPath, 0), imported);
   }
   return imported;
 }
@@ -279,8 +303,8 @@ export async function backportPlans(
       const content = readFileSync(plan.sourcePath, "utf-8");
       const title = plan.title;
       const slug = toSlug(title);
-      const { dd, mm, yyyy } = getDatePartsFor(new Date(`${plan.date}T12:00:00`));
-      const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+      const dateParts = getDatePartsFor(new Date(`${plan.date}T12:00:00`));
+      const dateDirRelative = getPlanDatePath(config, dateParts);
       const dateDirAbsolute = join(vaultPath, dateDirRelative);
       const counter = nextCounter(dateDirAbsolute);
 
@@ -371,7 +395,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const plans = discoverPlans(vaultPath, config.plan_path, config);
+  const plans = discoverPlans(vaultPath, config.plan.path, config);
 
   if (args.list) {
     const filtered = filterPlans(plans, args);

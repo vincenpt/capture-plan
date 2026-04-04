@@ -16,6 +16,7 @@ import {
   formatTagsYaml,
   getDateParts,
   getJournalPath,
+  getPlanDatePath,
   getProjectName,
   getVaultPath,
   loadConfig,
@@ -129,10 +130,11 @@ async function main(): Promise<void> {
     const { content: planContent, source: planSource, file: planFile } = extraction;
     const title = extractTitle(planContent);
     const slug = toSlug(title);
-    const { dd, mm, yyyy, dateKey, datetime, ampmTime } = getDateParts();
+    const dateParts = getDateParts();
+    const { dateKey, datetime, ampmTime } = dateParts;
 
     const config = await loadConfig(payload.cwd);
-    const dateDirRelative = `${config.plan_path}/${yyyy}/${mm}-${dd}`;
+    const dateDirRelative = getPlanDatePath(config, dateParts);
 
     debugLog(
       `HOOK=${hookEvent} SRC=${planSource} FILE=${planFile} TITLE=${title} SLUG=${slug} DATE_DIR=${dateDirRelative}\n`,
@@ -158,6 +160,26 @@ async function main(): Promise<void> {
     }
 
     const vaultPath = getVaultPath(config.vault);
+
+    // Detect scheme mismatch — warn if vault has dirs in a different layout
+    if (vaultPath) {
+      try {
+        const { detectVaultSchemes } = await import("./lib/migration.ts");
+        const onDisk = detectVaultSchemes(join(vaultPath, config.plan.path));
+        for (const detected of onDisk) {
+          if (detected !== config.plan.date_scheme) {
+            debugLog(
+              `Layout mismatch: vault has '${detected}' dirs but config uses '${config.plan.date_scheme}'. Run /capture-plan:migrate-layout to migrate.\n`,
+              DEBUG_LOG,
+            );
+            break;
+          }
+        }
+      } catch {
+        /* detection is advisory, never block */
+      }
+    }
+
     const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null;
     const counter = dateDirAbsolute ? nextCounter(dateDirAbsolute) : 1;
     const { summary, tags: newTags } = await summarizeWithClaude(planContent, PLAN_SYSTEM_PROMPT);

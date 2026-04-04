@@ -2,12 +2,19 @@
 
 import { dirname } from "node:path";
 import type { TranscriptStats } from "../transcript.ts";
+import type { DateScheme } from "./dates.ts";
+
+/** Configuration for a single path section (plan or journal). */
+export interface PathConfig {
+  path: string;
+  date_scheme: DateScheme;
+}
 
 /** Plugin configuration loaded from the 3-layer TOML config cascade. */
 export interface Config {
   vault?: string;
-  plan_path: string;
-  journal_path: string;
+  plan: PathConfig;
+  journal: PathConfig;
   context_cap?: number;
   superpowers_spec_pattern?: string;
   superpowers_plan_pattern?: string;
