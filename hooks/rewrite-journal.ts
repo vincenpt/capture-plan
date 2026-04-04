@@ -233,6 +233,53 @@ function extractSummarySection(content: string): string {
   return summaryMatch ? summaryMatch[1].trim() : body;
 }
 
+/** Pre-parsed data for a single plan directory, collected before summarization. */
+interface PlanDirData {
+  planDirName: string;
+  planDirRelative: string;
+  primaryNoteName: string;
+  primaryLinkText: string;
+  primaryContent: string;
+  title: string;
+  project: string;
+  source: string;
+  modelLabel: string;
+  ampmTime: string;
+  planTags: string;
+  hasSummary: boolean;
+  summaryContent?: string;
+  summaryModelLabel?: string;
+  summaryAmpmTime?: string;
+}
+
+/** A single summarization task to be run in parallel. */
+interface SummarizeTask {
+  key: string;
+  label: string;
+  content: string;
+  systemPrompt: string;
+}
+
+const SUMMARIZE_CONCURRENCY = 5;
+
+/** Run async tasks in parallel with a concurrency limit. */
+async function runWithConcurrency<T, R>(
+  items: T[],
+  fn: (item: T, index: number) => Promise<R>,
+  limit: number,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  return results;
+}
+
 /** Rewrite the journal for a specific day from existing vault plan/summary/activity notes. */
 export async function rewriteJournal(
   dateStr: string,
@@ -271,21 +318,19 @@ export async function rewriteJournal(
     result.backedUp = true; // Would back up in non-dry-run
   }
 
-  // Accumulate frontmatter data across all plans
-  const allProjects = new Set<string>();
-  const allTagsList: string[] = [];
-  let plansCount = 0;
+  // --- Phase 1: Collect plan data and summarization tasks ---
+  const planDataList: PlanDirData[] = [];
+  const summarizeTasks: SummarizeTask[] = [];
+  const needsSummarization = !options.skipSummarize && !options.dryRun;
 
   for (const planDirName of planDirNames) {
     const planDirRelative = `${config.plan.path}/${planDatePath}/${planDirName}`;
     const planDirAbsolute = join(vaultPath, planDirRelative);
 
     try {
-      // --- Read plan.md ---
       const planFilePath = join(planDirAbsolute, "plan.md");
       const activityFilePath = join(planDirAbsolute, "activity.md");
 
-      // Determine primary note: plan.md or activity.md (skill sessions)
       let primaryPath: string;
       let primaryLinkText: string;
       let primaryNoteName: string;
@@ -310,7 +355,6 @@ export async function rewriteJournal(
       const source = extra.source ?? (primaryNoteName === "activity" ? "skill" : "plan-mode");
       const modelLabel = extra.model ?? "";
 
-      // Extract time from created datetime: "[[path|2026-04-04T14:30]]"
       let ampmTime = "Plan";
       if (fm.datetime) {
         const timeMatch = fm.datetime.match(/T(\d{2}):(\d{2})/);
@@ -319,60 +363,30 @@ export async function rewriteJournal(
         }
       }
 
-      // Tags from frontmatter
       const planTags = fm.tags ? fm.tags.join(",") : "";
 
-      // Summarize plan content
-      let planSummary: string;
-      let planSummaryTags: string;
-      if (options.skipSummarize) {
-        planSummary = fallbackSummary(primaryContent);
-        planSummaryTags = planTags || "claude-session";
-      } else {
-        const prompt = primaryNoteName === "activity" ? SKILL_SYSTEM_PROMPT : PLAN_SYSTEM_PROMPT;
-        const res = await summarizeWithClaude(extractBody(primaryContent), prompt);
-        planSummary = res.summary;
-        planSummaryTags = res.tags || planTags || "claude-session";
-      }
-
-      // Build plan revision
-      const planPath = `${planDirRelative}/${primaryNoteName}`;
-      const revision = formatJournalRevision(
-        ampmTime,
-        planPath,
+      const data: PlanDirData = {
+        planDirName,
+        planDirRelative,
+        primaryNoteName,
         primaryLinkText,
+        primaryContent,
+        title,
+        project,
+        source,
         modelLabel,
-        planSummary,
-        planSummaryTags,
-      );
+        ampmTime,
+        planTags,
+        hasSummary: false,
+      };
 
-      if (!options.dryRun) {
-        await appendOrCreateCallout(
-          title,
-          revision,
-          project,
-          source,
-          journalPath,
-          vaultPath,
-          config.vault,
-        );
-      }
-      result.calloutsCreated++;
-      result.revisionsWritten++;
-
-      if (project) allProjects.add(project);
-      if (planSummaryTags) allTagsList.push(planSummaryTags);
-      plansCount++;
-
-      // --- Read summary.md (if exists) ---
+      // Check for summary.md
       const summaryFilePath = join(planDirAbsolute, "summary.md");
       if (existsSync(summaryFilePath)) {
         const summaryContent = readFileSync(summaryFilePath, "utf-8");
         const summaryFm = parsePlanFrontmatter(summaryContent);
         const summaryExtra = parseExtraFrontmatter(summaryContent);
-        const summaryModelLabel = summaryExtra.model ?? "";
 
-        // Extract time from summary created datetime
         let summaryAmpmTime = "Done";
         if (summaryFm.datetime) {
           const timeMatch = summaryFm.datetime.match(/T(\d{2}):(\d{2})/);
@@ -381,51 +395,149 @@ export async function rewriteJournal(
           }
         }
 
-        // Summarize the summary body
-        let doneSummary: string;
-        let doneTags: string;
-        if (options.skipSummarize) {
-          doneSummary = fallbackSummary(extractSummarySection(summaryContent));
-          doneTags = planSummaryTags;
-        } else {
-          const res = await summarizeWithClaude(
-            extractSummarySection(summaryContent),
-            DONE_SYSTEM_PROMPT,
-          );
-          doneSummary = res.summary;
-          doneTags = res.tags || planSummaryTags;
-        }
-
-        const summaryPath = `${planDirRelative}/summary`;
-        const doneRevision = formatJournalRevision(
-          summaryAmpmTime,
-          summaryPath,
-          "done",
-          summaryModelLabel,
-          doneSummary,
-          doneTags,
-        );
-
-        if (!options.dryRun) {
-          await appendOrCreateCallout(
-            title,
-            doneRevision,
-            project,
-            source,
-            journalPath,
-            vaultPath,
-            config.vault,
-          );
-        }
-        result.revisionsWritten++;
-        if (doneTags) allTagsList.push(doneTags);
+        data.hasSummary = true;
+        data.summaryContent = summaryContent;
+        data.summaryModelLabel = summaryExtra.model ?? "";
+        data.summaryAmpmTime = summaryAmpmTime;
       }
 
-      result.plansProcessed++;
+      planDataList.push(data);
+
+      // Queue summarization tasks (only when calling the API)
+      if (needsSummarization) {
+        const planPrompt =
+          primaryNoteName === "activity" ? SKILL_SYSTEM_PROMPT : PLAN_SYSTEM_PROMPT;
+        summarizeTasks.push({
+          key: `${planDirName}:plan`,
+          label: `${planDirName} (plan)`,
+          content: extractBody(primaryContent),
+          systemPrompt: planPrompt,
+        });
+
+        if (data.hasSummary && data.summaryContent) {
+          summarizeTasks.push({
+            key: `${planDirName}:done`,
+            label: `${planDirName} (done)`,
+            content: extractSummarySection(data.summaryContent),
+            systemPrompt: DONE_SYSTEM_PROMPT,
+          });
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       result.errors.push(`${planDirName}: ${msg}`);
     }
+  }
+
+  // --- Phase 2: Batch summarize in parallel ---
+  const summaryResults = new Map<string, { summary: string; tags: string }>();
+
+  if (summarizeTasks.length > 0) {
+    let completed = 0;
+    const total = summarizeTasks.length;
+
+    const batchResults = await runWithConcurrency(
+      summarizeTasks,
+      async (task) => {
+        const res = await summarizeWithClaude(task.content, task.systemPrompt);
+        completed++;
+        process.stderr.write(`[${completed}/${total}] Summarized: ${task.label}\n`);
+        return { key: task.key, ...res };
+      },
+      SUMMARIZE_CONCURRENCY,
+    );
+
+    for (const r of batchResults) {
+      summaryResults.set(r.key, { summary: r.summary, tags: r.tags });
+    }
+  }
+
+  // --- Phase 3: Assemble revisions and write callouts ---
+  const allProjects = new Set<string>();
+  const allTagsList: string[] = [];
+  let plansCount = 0;
+
+  for (const data of planDataList) {
+    // Resolve plan summary
+    let planSummary: string;
+    let planSummaryTags: string;
+    const planResult = summaryResults.get(`${data.planDirName}:plan`);
+    if (planResult) {
+      planSummary = planResult.summary;
+      planSummaryTags = planResult.tags || data.planTags || "claude-session";
+    } else {
+      planSummary = fallbackSummary(data.primaryContent);
+      planSummaryTags = data.planTags || "claude-session";
+    }
+
+    // Build plan revision
+    const planPath = `${data.planDirRelative}/${data.primaryNoteName}`;
+    const revision = formatJournalRevision(
+      data.ampmTime,
+      planPath,
+      data.primaryLinkText,
+      data.modelLabel,
+      planSummary,
+      planSummaryTags,
+    );
+
+    if (!options.dryRun) {
+      await appendOrCreateCallout(
+        data.title,
+        revision,
+        data.project,
+        data.source,
+        journalPath,
+        vaultPath,
+        config.vault,
+      );
+    }
+    result.calloutsCreated++;
+    result.revisionsWritten++;
+
+    if (data.project) allProjects.add(data.project);
+    if (planSummaryTags) allTagsList.push(planSummaryTags);
+    plansCount++;
+
+    // Summary revision (if summary.md existed)
+    if (data.hasSummary && data.summaryContent) {
+      let doneSummary: string;
+      let doneTags: string;
+      const doneResult = summaryResults.get(`${data.planDirName}:done`);
+      if (doneResult) {
+        doneSummary = doneResult.summary;
+        doneTags = doneResult.tags || planSummaryTags;
+      } else {
+        doneSummary = fallbackSummary(extractSummarySection(data.summaryContent));
+        doneTags = planSummaryTags;
+      }
+
+      const summaryPath = `${data.planDirRelative}/summary`;
+      const doneRevision = formatJournalRevision(
+        data.summaryAmpmTime ?? "Done",
+        summaryPath,
+        "done",
+        data.summaryModelLabel ?? "",
+        doneSummary,
+        doneTags,
+      );
+
+      if (!options.dryRun) {
+        await appendOrCreateCallout(
+          data.title,
+          doneRevision,
+          data.project,
+          data.source,
+          journalPath,
+          vaultPath,
+          config.vault,
+        );
+      }
+      result.revisionsWritten++;
+      if (doneTags) allTagsList.push(doneTags);
+    }
+
+    result.plansProcessed++;
   }
 
   // Set journal frontmatter — call once per plan to increment the plans counter correctly

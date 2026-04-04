@@ -68,8 +68,10 @@ Use `AskUserQuestion` to confirm:
 Run the same command without `--dry-run`:
 
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/hooks/rewrite-journal.ts --day=YYYY-MM-DD [--skip-summarize] 2>/dev/null
+bun ${CLAUDE_PLUGIN_ROOT}/hooks/rewrite-journal.ts --day=YYYY-MM-DD [--skip-summarize]
 ```
+
+Progress lines appear on stderr during summarization (e.g. `[3/40] Summarized: 01-my-slug (plan)`).
 
 Parse the JSON result and display: "Rewrote journal for YYYY-MM-DD: N callouts created, M revisions written. Backup saved."
 
