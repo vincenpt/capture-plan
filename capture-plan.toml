@@ -21,3 +21,8 @@ date_scheme = "calendar"   # calendar | compact | monthly | flat
 # Override patterns if superpowers writes to non-default directories.
 # superpowers_spec_pattern = "/superpowers/specs/"
 # superpowers_plan_pattern = "/superpowers/plans/"
+
+# Skills to capture as standalone sessions (whitelist).
+# Only skill-only sessions matching this list are captured.
+# Skills during plan-mode/superpowers sessions are always captured.
+capture_skills = ["simplify"]

@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { DONE_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, SKILL_SYSTEM_PROMPT } from "./lib/prompts.ts";
+import { IS_DEV_MODE } from "./lib/types.ts";
 import {
   appendOrCreateCallout,
   type Config,
@@ -48,6 +49,7 @@ import {
   collectToolLog,
   collectTranscriptStats,
   computeDurationMs,
+  filterSkillInvocations,
   findExitPlanIndex,
   findSkillInvocations,
   findSuperpowersBoundary,
@@ -485,7 +487,15 @@ async function main(): Promise<void> {
 
       // Skill-only session (no superpowers state was built above)
       if (!state && hasSkills) {
-        const skillInvocations = findSkillInvocations(entries);
+        if (IS_DEV_MODE) {
+          debugLog("Dev mode detected, skipping skill-only capture\n", DEBUG_LOG);
+          process.exit(0);
+        }
+
+        const skillInvocations = filterSkillInvocations(
+          findSkillInvocations(entries),
+          config.capture_skills,
+        );
         if (skillInvocations.length === 0) process.exit(0);
 
         debugLog(

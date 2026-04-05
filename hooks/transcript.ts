@@ -677,6 +677,17 @@ export function findSkillInvocations(entries: TranscriptEntry[]): SkillInvocatio
   return results;
 }
 
+/** Filter skill invocations against a whitelist. undefined = pass all, [] = pass none. */
+export function filterSkillInvocations(
+  invocations: SkillInvocation[],
+  captureSkills?: string[],
+): SkillInvocation[] {
+  if (!captureSkills) return invocations;
+  if (captureSkills.length === 0) return [];
+  const allowSet = new Set(captureSkills);
+  return invocations.filter((inv) => allowSet.has(inv.skill));
+}
+
 const DEFAULT_SPEC_PATTERN = "/superpowers/specs/";
 const DEFAULT_PLAN_PATTERN = "/superpowers/plans/";
 

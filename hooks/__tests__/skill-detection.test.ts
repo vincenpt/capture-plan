@@ -3,7 +3,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TranscriptEntry } from "../transcript.ts";
-import { findSkillInvocations, transcriptContainsPattern } from "../transcript.ts";
+import {
+  filterSkillInvocations,
+  findSkillInvocations,
+  transcriptContainsPattern,
+} from "../transcript.ts";
 import { assistantEntry, humanEntry, skillEntry } from "./helpers/transcript-helpers.ts";
 
 describe("findSkillInvocations", () => {
@@ -137,6 +141,63 @@ describe("transcriptContainsPattern for skills", () => {
 
     expect(transcriptContainsPattern(file, ['"Skill"'])).toBe(false);
     Bun.spawnSync(["rm", "-rf", tempDir]);
+  });
+});
+
+describe("filterSkillInvocations", () => {
+  it("returns all invocations when captureSkills is undefined", () => {
+    const entries: TranscriptEntry[] = [
+      skillEntry("simplify"),
+      humanEntry(),
+      skillEntry("start-dev"),
+    ];
+    const invocations = findSkillInvocations(entries);
+    expect(filterSkillInvocations(invocations, undefined)).toHaveLength(2);
+  });
+
+  it("returns empty array when captureSkills is empty", () => {
+    const entries: TranscriptEntry[] = [skillEntry("simplify")];
+    const invocations = findSkillInvocations(entries);
+    expect(filterSkillInvocations(invocations, [])).toHaveLength(0);
+  });
+
+  it("keeps only whitelisted skills", () => {
+    const entries: TranscriptEntry[] = [
+      skillEntry("start-dev"),
+      humanEntry(),
+      skillEntry("simplify"),
+      humanEntry(),
+      skillEntry("end-dev"),
+    ];
+    const invocations = findSkillInvocations(entries);
+    const filtered = filterSkillInvocations(invocations, ["simplify"]);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].skill).toBe("simplify");
+  });
+
+  it("returns empty when no invocations match the whitelist", () => {
+    const entries: TranscriptEntry[] = [
+      skillEntry("start-dev"),
+      humanEntry(),
+      skillEntry("test-e2e"),
+    ];
+    const invocations = findSkillInvocations(entries);
+    expect(filterSkillInvocations(invocations, ["simplify"])).toHaveLength(0);
+  });
+
+  it("keeps multiple whitelisted skills", () => {
+    const entries: TranscriptEntry[] = [
+      skillEntry("simplify"),
+      humanEntry(),
+      skillEntry("test-driven-development"),
+      humanEntry(),
+      skillEntry("start-dev"),
+    ];
+    const invocations = findSkillInvocations(entries);
+    const filtered = filterSkillInvocations(invocations, ["simplify", "test-driven-development"]);
+    expect(filtered).toHaveLength(2);
+    expect(filtered[0].skill).toBe("simplify");
+    expect(filtered[1].skill).toBe("test-driven-development");
   });
 });
 

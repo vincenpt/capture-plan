@@ -45,6 +45,10 @@ export async function loadConfig(cwd?: string): Promise<Config> {
   const merged = { ...pluginDefault, ...userGlobal, ...project };
   const rawCap = merged.context_cap;
   const contextCap = typeof rawCap === "number" && rawCap > 0 ? rawCap : undefined;
+  const rawCaptureSkills = merged.capture_skills;
+  const captureSkills = Array.isArray(rawCaptureSkills)
+    ? rawCaptureSkills.filter((s): s is string => typeof s === "string")
+    : undefined;
 
   // Resolve plan config: grouped [plan] table takes precedence over flat plan_path key
   const mergedPlan = merged.plan as Record<string, unknown> | undefined;
@@ -65,6 +69,7 @@ export async function loadConfig(cwd?: string): Promise<Config> {
     context_cap: contextCap,
     superpowers_spec_pattern: (merged.superpowers_spec_pattern as string) || undefined,
     superpowers_plan_pattern: (merged.superpowers_plan_pattern as string) || undefined,
+    capture_skills: captureSkills,
   };
 }
 

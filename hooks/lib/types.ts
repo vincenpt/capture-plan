@@ -1,6 +1,7 @@
 // types.ts — Shared type definitions and path constants
 
-import { dirname } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { TranscriptStats } from "../transcript.ts";
 import type { DateScheme } from "./dates.ts";
 
@@ -18,6 +19,7 @@ export interface Config {
   context_cap?: number;
   superpowers_spec_pattern?: string;
   superpowers_plan_pattern?: string;
+  capture_skills?: string[];
 }
 
 /** Persisted state that bridges the ExitPlanMode and Stop hooks within a session. */
@@ -74,3 +76,5 @@ export interface ToolsLogResult {
 export const HOOKS_DIR = dirname(Bun.main);
 /** Absolute path to the plugin root directory (parent of hooks/). */
 export const PLUGIN_ROOT = dirname(HOOKS_DIR);
+/** True when the plugin is running from a symlinked dev repo (has .git dir). */
+export const IS_DEV_MODE: boolean = existsSync(join(PLUGIN_ROOT, ".git"));
