@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   classifyDateEntry,
@@ -199,13 +199,43 @@ describe("computeJournalMoves", () => {
 });
 
 describe("executeMoves", () => {
+  let spawnSyncSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    // Mock Bun.spawnSync to simulate Obsidian CLI move/delete via filesystem
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockImplementation(((cmd: string[]) => {
+      const pathArg = cmd.find((a: string) => a.startsWith("path="))?.slice(5);
+      if (cmd.includes("move")) {
+        const toArg = cmd.find((a: string) => a.startsWith("to="))?.slice(3);
+        if (pathArg && toArg) {
+          const absFrom = join(tempDir, pathArg);
+          const absTo = join(tempDir, toArg);
+          mkdirSync(join(absTo, ".."), { recursive: true });
+          renameSync(absFrom, absTo);
+        }
+      } else if (cmd.includes("delete") && pathArg) {
+        const abs = join(tempDir, pathArg);
+        try {
+          rmSync(abs, { recursive: true });
+        } catch {
+          /* ignore */
+        }
+      }
+      return { exitCode: 0, success: true, stdout: Buffer.from(""), stderr: Buffer.from("") };
+    }) as typeof Bun.spawnSync);
+  });
+
+  afterEach(() => {
+    spawnSyncSpy?.mockRestore();
+  });
+
   it("moves directories to new locations", () => {
     const from = join(tempDir, "src/001-test");
     const to = join(tempDir, "dst/001-test");
     mkdirSync(from, { recursive: true });
     writeFileSync(join(from, "plan.md"), "test");
 
-    const count = executeMoves([{ from, to, type: "plan-dir" }]);
+    const count = executeMoves([{ from, to, type: "plan-dir" }], tempDir);
     expect(count).toBe(1);
     expect(readdirSync(to)).toContain("plan.md");
   });
@@ -213,7 +243,7 @@ describe("executeMoves", () => {
   it("skips moves where from equals to", () => {
     const path = join(tempDir, "same/001-test");
     mkdirSync(path, { recursive: true });
-    const count = executeMoves([{ from: path, to: path, type: "plan-dir" }]);
+    const count = executeMoves([{ from: path, to: path, type: "plan-dir" }], tempDir);
     expect(count).toBe(0);
   });
 });

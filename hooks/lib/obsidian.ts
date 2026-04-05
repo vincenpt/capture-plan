@@ -93,7 +93,7 @@ export function appendToJournal(content: string, journalPath: string, vault?: st
   const result = runObsidian(["append", `path=${pathWithExt}`, `content=${escaped}`], vault);
   if (result.exitCode !== 0) {
     // File doesn't exist yet — create it, then append
-    runObsidian(["create", `path=${journalPath}`, "content= ", "silent"], vault);
+    runObsidian(["create", `path=${pathWithExt}`, "content= "], vault);
     runObsidian(["append", `path=${pathWithExt}`, `content=${escaped}`], vault);
   }
 }

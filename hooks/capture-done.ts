@@ -446,7 +446,7 @@ async function main(): Promise<void> {
 
       if (boundaryIdx === -1) {
         debugLog("No plan boundary found in transcript\n", DEBUG_LOG);
-        if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
+        deleteVaultState(state.plan_dir, config.vault);
         process.exit(0);
       }
     } else {
@@ -525,7 +525,7 @@ async function main(): Promise<void> {
       }
       // Superpowers: still capture the plan note even without execution
       // (state was already created with vault note in buildSuperpowersState)
-      if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
+      deleteVaultState(state.plan_dir, config.vault);
       process.exit(0);
     }
 
@@ -648,7 +648,7 @@ ${fileList}
         `Failed to create summary note: stdout=${createResult.stdout} stderr=${createResult.stderr}\n`,
         DEBUG_LOG,
       );
-      if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
+      deleteVaultState(state.plan_dir, config.vault);
       process.exit(0);
     }
 
@@ -792,7 +792,7 @@ ${contextText || "_No context captured_"}
     );
 
     // Clean up session state from vault
-    if (vaultPath) deleteVaultState(state.plan_dir, vaultPath);
+    deleteVaultState(state.plan_dir, config.vault);
 
     console.error(`Done summary captured -> ${summaryPath}.md`);
     debugLog(`Summary captured for ${state.plan_title}\n`, DEBUG_LOG);

@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import * as shared from "../shared.ts";
@@ -291,20 +291,37 @@ describe("writeVaultState + parseStateFromFrontmatter skill round-trip", () => {
 });
 
 describe("deleteVaultState", () => {
-  it("removes the state file", () => {
-    const stateDir = join(tempDir, "Claude/Plans/2026/03-29/001-test");
-    mkdirSync(stateDir, { recursive: true });
-    writeFileSync(join(stateDir, "state.md"), "---\n---");
-    expect(existsSync(join(stateDir, "state.md"))).toBe(true);
+  it("calls obsidian delete with correct path", () => {
+    const calls: string[][] = [];
+    const spy = spyOn(Bun, "spawnSync").mockImplementation(((cmd: string[]) => {
+      calls.push([...cmd]);
+      return { exitCode: 0, success: true, stdout: Buffer.from(""), stderr: Buffer.from("") };
+    }) as typeof Bun.spawnSync);
 
-    shared.deleteVaultState("Claude/Plans/2026/03-29/001-test", tempDir);
-    expect(existsSync(join(stateDir, "state.md"))).toBe(false);
+    shared.deleteVaultState("Claude/Plans/2026/03-29/001-test", "MyVault");
+    spy.mockRestore();
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toContain("delete");
+    expect(calls[0]).toContain("path=Claude/Plans/2026/03-29/001-test/state.md");
+    expect(calls[0]).toContain("permanent");
+    expect(calls[0]).toContain("vault=MyVault");
   });
 
-  it("ignores missing file without throwing", () => {
+  it("does not throw on missing file", () => {
+    const spy = spyOn(Bun, "spawnSync").mockImplementation((() => {
+      return {
+        exitCode: 0,
+        success: true,
+        stdout: Buffer.from("Error: not found"),
+        stderr: Buffer.from(""),
+      };
+    }) as typeof Bun.spawnSync);
+
     expect(() => {
-      shared.deleteVaultState("nonexistent/path", tempDir);
+      shared.deleteVaultState("nonexistent/path");
     }).not.toThrow();
+    spy.mockRestore();
   });
 });
 

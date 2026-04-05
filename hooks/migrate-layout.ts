@@ -83,7 +83,7 @@ async function main(): Promise<void> {
         printMoves(allMoves, vaultPath);
 
         if (!args.dryRun) {
-          const moved = executeMoves(allMoves);
+          const moved = executeMoves(allMoves, vaultPath, config.vault);
           const fromPaths = allMoves.map((m) => m.from);
           const cleaned = cleanEmptyDirs(fromPaths, planBase);
           totalMoves += moved;
@@ -124,7 +124,7 @@ async function main(): Promise<void> {
         printMoves(allMoves, vaultPath);
 
         if (!args.dryRun) {
-          const moved = executeMoves(allMoves);
+          const moved = executeMoves(allMoves, vaultPath, config.vault);
           const fromPaths = allMoves.map((m) => m.from);
           const cleaned = cleanEmptyDirs(fromPaths, journalBase);
           totalMoves += moved;

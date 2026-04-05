@@ -1,7 +1,7 @@
 // migration.ts — Vault layout detection and migration utilities
 
-import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, rmdirSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { type DateScheme, formatDatePath, getDatePartsFor } from "./dates.ts";
 import {
   COMPACT_DATE_PATTERN,
@@ -11,6 +11,7 @@ import {
   PLAN_DIR_PATTERN,
   YEAR_PATTERN,
 } from "./fs.ts";
+import { runObsidian } from "./obsidian.ts";
 
 /** Convert a date path from one scheme to another. Returns the new path segment, or null on parse failure. */
 function remapDatePath(
@@ -324,29 +325,81 @@ function collectJournalMovesUnderYear(
   }
 }
 
-/** Execute a list of moves, creating target directories as needed. Returns count of moves executed.
- *  When the target already exists, plan directories are merged (source entries that
- *  don't exist in the target are copied over) and journal files are skipped. */
-export function executeMoves(moves: MoveEntry[]): number {
+/** Move a single file via the Obsidian CLI, keeping the vault index in sync. Target directories are created on disk since the CLI cannot create folders. */
+function moveVaultFile(fromRel: string, toRel: string, vault?: string): void {
+  mkdirSync(dirname(toRel), { recursive: true });
+  runObsidian(["move", `path=${fromRel}`, `to=${toRel}`], vault);
+}
+
+/** Execute a list of moves via the Obsidian CLI, creating target directories as needed.
+ *  Returns count of moves executed. When the target already exists, plan directories
+ *  are merged (source files that don't exist in the target are moved over) and journal
+ *  files are skipped. */
+export function executeMoves(moves: MoveEntry[], vaultPath: string, vault?: string): number {
   let count = 0;
   for (const move of moves) {
     if (move.from === move.to) continue;
-    mkdirSync(dirname(move.to), { recursive: true });
+    const fromRel = relative(vaultPath, move.from);
+    const toRel = relative(vaultPath, move.to);
 
     if (existsSync(move.to)) {
       if (move.type === "plan-dir") {
-        for (const entry of readdirSync(move.from)) {
-          const src = join(move.from, entry);
-          const dest = join(move.to, entry);
+        // Merge: move individual files that don't exist at destination
+        for (const entry of readdirSync(move.from, { withFileTypes: true })) {
+          const dest = join(move.to, entry.name);
           if (!existsSync(dest)) {
-            cpSync(src, dest, { recursive: true });
+            if (entry.isDirectory()) {
+              // Subdirectories (e.g. agents/): move each file inside
+              for (const sub of readdirSync(join(move.from, entry.name))) {
+                moveVaultFile(
+                  `${fromRel}/${entry.name}/${sub}`,
+                  `${toRel}/${entry.name}/${sub}`,
+                  vault,
+                );
+              }
+            } else {
+              moveVaultFile(`${fromRel}/${entry.name}`, `${toRel}/${entry.name}`, vault);
+            }
           }
         }
-        rmSync(move.from, { recursive: true });
+        // Delete remaining source files via CLI, then clean up empty dir on disk
+        for (const entry of readdirSync(move.from)) {
+          runObsidian(["delete", `path=${fromRel}/${entry}`, "permanent"], vault);
+        }
+        try {
+          rmdirSync(move.from);
+        } catch {
+          /* non-empty or already gone */
+        }
       }
       // journal-file: target is newer — skip, cleanEmptyDirs handles the rest
     } else {
-      renameSync(move.from, move.to);
+      if (move.type === "plan-dir") {
+        // Move each file individually (CLI operates on files, not directories)
+        mkdirSync(move.to, { recursive: true });
+        for (const entry of readdirSync(move.from, { withFileTypes: true })) {
+          if (entry.isDirectory()) {
+            for (const sub of readdirSync(join(move.from, entry.name))) {
+              moveVaultFile(
+                `${fromRel}/${entry.name}/${sub}`,
+                `${toRel}/${entry.name}/${sub}`,
+                vault,
+              );
+            }
+          } else {
+            moveVaultFile(`${fromRel}/${entry.name}`, `${toRel}/${entry.name}`, vault);
+          }
+        }
+        try {
+          rmdirSync(move.from);
+        } catch {
+          /* non-empty or already gone */
+        }
+      } else {
+        // journal-file or loose: single file move
+        mkdirSync(dirname(move.to), { recursive: true });
+        moveVaultFile(fromRel, toRel, vault);
+      }
     }
     count++;
   }
