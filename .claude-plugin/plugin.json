@@ -1,6 +1,6 @@
 {
   "name": "capture-plan",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Captures Claude Code plans and execution summaries to an Obsidian vault with daily journal integration",
   "author": {
     "name": "kriswill",
