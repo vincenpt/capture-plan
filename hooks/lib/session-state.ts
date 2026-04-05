@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { TranscriptStats } from "../transcript.ts";
 import { formatDatePath, getDatePartsFor } from "./dates.ts";
 import { createVaultNote, getVaultPath, runObsidian } from "./obsidian.ts";
+import { ensureMdExt } from "./text.ts";
 import type { Config, PlanFrontmatter, SessionState } from "./types.ts";
 
 const STALE_STATE_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -190,11 +191,14 @@ export function parsePlanFrontmatter(content: string): PlanFrontmatter {
   return result;
 }
 
-/** Append a revision bullet to an existing callout block with the given title in the journal file. */
+/** Append a revision bullet to an existing callout block with the given title in the journal file.
+ *  Reads the file directly (safe for vault index), but writes back via Obsidian CLI to keep the vault in sync. */
 export async function appendRevisionToCallout(
   planTitle: string,
   revision: string,
   journalFilePath: string,
+  journalRelPath: string,
+  vault?: string,
 ): Promise<boolean> {
   try {
     const content = await Bun.file(journalFilePath).text();
@@ -221,7 +225,9 @@ export async function appendRevisionToCallout(
     // Insert the new revision lines after the last callout line
     const revisionLines = revision.split("\n");
     lines.splice(lastCalloutLine + 1, 0, ...revisionLines);
-    await Bun.write(journalFilePath, lines.join("\n"));
+
+    // Write back via Obsidian CLI (createVaultNote handles delete-before-create)
+    createVaultNote(ensureMdExt(journalRelPath), lines.join("\n"), vault);
     return true;
   } catch {
     return false;

@@ -328,6 +328,17 @@ describe("deleteVaultState", () => {
 // ---- appendRevisionToCallout ----
 
 describe("appendRevisionToCallout", () => {
+  const JOURNAL_REL = "Journal/2026/04-April/04-Friday";
+
+  /** Extract the written content from mocked CLI create calls. */
+  function extractCreateContent(calls: string[][]): string {
+    const createCall = calls.find((c) => c.includes("create"));
+    if (!createCall) return "";
+    const contentArg = createCall.find((a) => a.startsWith("content="));
+    if (!contentArg) return "";
+    return contentArg.slice("content=".length).replace(/\\n/g, "\n");
+  }
+
   it("inserts a revision after the last callout line in the matching block", async () => {
     const journalFile = join(tempDir, "journal.md");
     await Bun.write(
@@ -351,10 +362,26 @@ describe("appendRevisionToCallout", () => {
 >   New revision.
 >   #tag2`;
 
-    const result = await shared.appendRevisionToCallout("My Plan", revision, journalFile);
+    const calls: string[][] = [];
+    const spy = spyOn(Bun, "spawnSync").mockImplementation(((cmd: string[]) => {
+      calls.push([...cmd]);
+      return { exitCode: 0, success: true, stdout: Buffer.from(""), stderr: Buffer.from("") };
+    }) as typeof Bun.spawnSync);
+
+    const result = await shared.appendRevisionToCallout(
+      "My Plan",
+      revision,
+      journalFile,
+      JOURNAL_REL,
+    );
+    spy.mockRestore();
     expect(result).toBe(true);
 
-    const content = await Bun.file(journalFile).text();
+    // Verify CLI was called with move (backup) + create
+    expect(calls.some((c) => c.includes("move"))).toBe(true);
+    expect(calls.some((c) => c.includes("create"))).toBe(true);
+
+    const content = extractCreateContent(calls);
     const lines = content.split("\n");
     const firstEntryIdx = lines.findIndex((l) => l.includes("First entry"));
     const newRevIdx = lines.findIndex((l) => l.includes("New revision"));
@@ -372,6 +399,7 @@ describe("appendRevisionToCallout", () => {
       "Missing Plan",
       "> - **2:00 PM** [[p|plan]]",
       journalFile,
+      JOURNAL_REL,
     );
     expect(result).toBe(false);
   });
@@ -381,6 +409,7 @@ describe("appendRevisionToCallout", () => {
       "My Plan",
       "> - **2:00 PM** [[p|plan]]",
       join(tempDir, "nonexistent.md"),
+      JOURNAL_REL,
     );
     expect(result).toBe(false);
   });
@@ -400,10 +429,22 @@ describe("appendRevisionToCallout", () => {
     const revision = `> - **2:00 PM** [[new|done]] \`opus-4(200k)\`
 >   Second entry.`;
 
-    const result = await shared.appendRevisionToCallout("My Plan", revision, journalFile);
+    const calls: string[][] = [];
+    const spy = spyOn(Bun, "spawnSync").mockImplementation(((cmd: string[]) => {
+      calls.push([...cmd]);
+      return { exitCode: 0, success: true, stdout: Buffer.from(""), stderr: Buffer.from("") };
+    }) as typeof Bun.spawnSync);
+
+    const result = await shared.appendRevisionToCallout(
+      "My Plan",
+      revision,
+      journalFile,
+      JOURNAL_REL,
+    );
+    spy.mockRestore();
     expect(result).toBe(true);
 
-    const content = await Bun.file(journalFile).text();
+    const content = extractCreateContent(calls);
     expect(content).toContain("Second entry");
     expect(content.indexOf("Second entry")).toBeGreaterThan(content.indexOf("First entry"));
   });
@@ -424,10 +465,22 @@ describe("appendRevisionToCallout", () => {
     const revision = `> - **2:00 PM** [[new|done]] \`opus-4(200k)\`
 >   New entry.`;
 
-    const result = await shared.appendRevisionToCallout("My Plan", revision, journalFile);
+    const calls: string[][] = [];
+    const spy = spyOn(Bun, "spawnSync").mockImplementation(((cmd: string[]) => {
+      calls.push([...cmd]);
+      return { exitCode: 0, success: true, stdout: Buffer.from(""), stderr: Buffer.from("") };
+    }) as typeof Bun.spawnSync);
+
+    const result = await shared.appendRevisionToCallout(
+      "My Plan",
+      revision,
+      journalFile,
+      JOURNAL_REL,
+    );
+    spy.mockRestore();
     expect(result).toBe(true);
 
-    const content = await Bun.file(journalFile).text();
+    const content = extractCreateContent(calls);
     const lines = content.split("\n");
     const tagIdx = lines.findIndex((l) => l.includes("#tag1 #tag2"));
     const bulletIdx = lines.findIndex((l) => l.includes("2:00 PM"));

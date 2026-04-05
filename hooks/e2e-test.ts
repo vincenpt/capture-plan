@@ -17,13 +17,17 @@ import { join } from "node:path";
 import { contextHintPath } from "./capture-session-start.ts";
 import {
   createVaultNote,
+  ensureMdExt,
   getDateParts,
   getJournalPath,
   getPlanDatePath,
   getVaultPath,
+  listVaultFiles,
+  listVaultFolders,
   loadConfig,
   nextCounter,
   padCounter,
+  runObsidian,
   shortSessionId,
   toSlug,
 } from "./shared.ts";
@@ -531,8 +535,14 @@ function checkHookErrors(phase: string, hookResult: HookResult): void {
 
 // ---- Journal Cleanup ----
 
-/** Removes callout blocks matching `> [!plan]+ {title}` from the journal file. */
-function removeJournalCallout(title: string, journalFilePath: string): boolean {
+/** Removes callout blocks matching `> [!plan]+ {title}` from the journal file.
+ *  Writes back via Obsidian CLI to keep the vault index in sync. */
+function removeJournalCallout(
+  title: string,
+  journalFilePath: string,
+  journalRelPath: string,
+  vault?: string,
+): boolean {
   try {
     let content = readFileSync(journalFilePath, "utf8");
     const header = `> [!plan]+ ${title}`;
@@ -570,7 +580,9 @@ function removeJournalCallout(title: string, journalFilePath: string): boolean {
       removed = true;
     }
 
-    if (removed) writeFileSync(journalFilePath, content);
+    if (removed) {
+      createVaultNote(ensureMdExt(journalRelPath), content, vault);
+    }
     return removed;
   } catch {
     return false;
@@ -919,15 +931,28 @@ async function main(): Promise<void> {
   } else {
     console.log("Cleanup");
 
-    // Remove plan directory from vault
+    // Remove plan directory from vault via Obsidian CLI
     if (existsSync(planDirAbsolute)) {
-      rmSync(planDirAbsolute, { recursive: true });
+      // Delete files in subdirectories first, then top-level files
+      for (const sub of listVaultFolders(planDir, config.vault)) {
+        for (const file of listVaultFiles(`${planDir}/${sub}`, config.vault)) {
+          runObsidian(["delete", `path=${planDir}/${sub}/${file}`, "permanent"], config.vault);
+        }
+      }
+      for (const file of listVaultFiles(planDir, config.vault)) {
+        runObsidian(["delete", `path=${planDir}/${file}`, "permanent"], config.vault);
+      }
+      // Clean up empty directory shell left after CLI file deletions
+      // (empty dirs aren't tracked by the vault index, safe to remove directly)
+      if (existsSync(planDirAbsolute)) {
+        rmSync(planDirAbsolute, { recursive: true });
+      }
       record("cleanup", "plan directory removed", !existsSync(planDirAbsolute));
     }
 
     // Remove journal callout
     if (journalExists) {
-      const removed = removeJournalCallout(PLAN_TITLE, journalFile);
+      const removed = removeJournalCallout(PLAN_TITLE, journalFile, journalPath, config.vault);
       record("cleanup", "journal callout removed", removed);
     }
 
