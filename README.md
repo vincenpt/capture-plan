@@ -9,10 +9,10 @@ A Claude Code plugin that captures plans and execution summaries to an Obsidian 
 - **On ExitPlanMode**: Captures the plan content, summarizes it with Claude Haiku, creates an Obsidian note, and appends an entry to your daily journal.
 - **On Stop**: If a plan was executed during the session, captures the final summary as a companion note linked to the plan.
 
-Notes are organized as:
+Notes are organized as (default `calendar` scheme):
 ```
-Claude/Plans/<yyyy>/<mm-dd>/<counter>-<slug>/plan.md
-Claude/Plans/<yyyy>/<mm-dd>/<counter>-<slug>/summary.md
+Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/plan.md
+Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/summary.md
 ```
 
 ## Prerequisites
@@ -124,9 +124,9 @@ The `date_scheme` setting controls how date segments are formatted in vault path
 
 | Scheme | Plan path example | Journal path example |
 |---|---|---|
-| `calendar` (default) | `Claude/Plans/2026/04-04/…` | `Journal/2026/04-04.md` |
-| `compact` | `Claude/Plans/2026/0404/…` | `Journal/2026/0404.md` |
-| `monthly` | `Claude/Plans/2026-04/04/…` | `Journal/2026-04/04.md` |
+| `calendar` (default) | `Claude/Plans/2026/04-April/04-Saturday/…` | `Journal/2026/04-April/04-Saturday.md` |
+| `compact` | `Claude/Plans/2026/04-04/…` | `Journal/2026/04-04.md` |
+| `monthly` | `Claude/Plans/2026/04-April/04/…` | `Journal/2026/04-April/04.md` |
 | `flat` | `Claude/Plans/2026-04-04/…` | `Journal/2026-04-04.md` |
 
 Old flat keys (`plan_path`, `journal_path`) are still accepted for backward compatibility; the `[plan]`/`[journal]` tables take precedence.
