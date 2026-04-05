@@ -15,6 +15,7 @@ import {
   formatJournalRevision,
   formatModelLabel,
   formatModelYaml,
+  formatSessionYaml,
   formatTagsYaml,
   getDateParts,
   getDayName,
@@ -28,11 +29,11 @@ import {
   readCcVersion,
   resolveContextCap,
   type SessionState,
-  shortSessionId,
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
   updateJournalFrontmatter,
+  upsertSessionDoc,
   writeVaultState,
 } from "./shared.ts"
 import {
@@ -180,9 +181,10 @@ async function main(): Promise<void> {
     const ccVersion = detectCcVersion() ?? readCcVersion(sessionId)
     const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
+    const sessionYaml = formatSessionYaml(sessionId, config.session.enabled, config.session.path)
+
     const noteContent = `---
-created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}${sessionYaml}${ccVersionYaml}${modelYaml}
 ---
 # ${title}
 
@@ -197,6 +199,15 @@ ${stripTitleLine(planContent)}
       )
       process.exit(0)
     }
+
+    // Create/update session document if enabled
+    upsertSessionDoc({
+      sessionId,
+      session: config.session,
+      vault: config.vault,
+      project,
+      plans: [{ path: planPath, title }],
+    })
 
     // Build journal callout revision and append (grouping by title)
     const modelLabel = formatModelLabel(stats?.model, contextCap)

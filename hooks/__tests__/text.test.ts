@@ -10,6 +10,7 @@ import {
   formatJournalRevision,
   formatModelLabel,
   formatNumber,
+  formatSessionYaml,
   formatTagsYaml,
   getDayName,
   getProjectName,
@@ -17,6 +18,7 @@ import {
   langFromPath,
   mergeTags,
   padCounter,
+  sessionDocPath,
   shortSessionId,
   stripTitleLine,
   toSlug,
@@ -295,6 +297,42 @@ describe("shortSessionId", () => {
 
   it("returns full string if shorter than 8", () => {
     expect(shortSessionId("abc")).toBe("abc")
+  })
+})
+
+describe("sessionDocPath", () => {
+  it("segments by first 2 chars of session ID", () => {
+    expect(sessionDocPath("Claude/Sessions", "3a76e3ac-3e0b-44c4-8962-b02716a8138b")).toBe(
+      "Claude/Sessions/3a/76e3ac-3e0b-44c4-8962-b02716a8138b",
+    )
+  })
+
+  it("works with custom path", () => {
+    expect(sessionDocPath("My/Sessions", "abcdef1234")).toBe("My/Sessions/ab/cdef1234")
+  })
+})
+
+describe("formatSessionYaml", () => {
+  it("returns empty string when disabled", () => {
+    expect(
+      formatSessionYaml("3a76e3ac-3e0b-44c4-8962-b02716a8138b", false, "Claude/Sessions"),
+    ).toBe("")
+  })
+
+  it("returns session YAML line when enabled", () => {
+    const result = formatSessionYaml(
+      "3a76e3ac-3e0b-44c4-8962-b02716a8138b",
+      true,
+      "Claude/Sessions",
+    )
+    expect(result).toBe(
+      '\nsession: "[[Claude/Sessions/3a/76e3ac-3e0b-44c4-8962-b02716a8138b|3a76e3ac]]"',
+    )
+  })
+
+  it("uses custom path", () => {
+    const result = formatSessionYaml("abcdef1234", true, "My/Path")
+    expect(result).toBe('\nsession: "[[My/Path/ab/cdef1234|abcdef12]]"')
   })
 })
 

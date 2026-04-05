@@ -140,6 +140,24 @@ export function shortSessionId(id: string): string {
   return id.slice(0, 8)
 }
 
+/** Build the vault path for a session document (id-segmented by first 2 chars, no .md extension). */
+export function sessionDocPath(sessionPath: string, sessionId: string): string {
+  const prefix = sessionId.slice(0, 2)
+  const rest = sessionId.slice(2)
+  return `${sessionPath}/${prefix}/${rest}`
+}
+
+/** Build the session frontmatter YAML line, or empty string if sessions are disabled. */
+export function formatSessionYaml(
+  sessionId: string,
+  sessionEnabled: boolean,
+  sessionPath: string,
+): string {
+  if (!sessionEnabled) return ""
+  const docPath = sessionDocPath(sessionPath, sessionId)
+  return `\nsession: "[[${docPath}|${shortSessionId(sessionId)}]]"`
+}
+
 /** Format a number with locale-aware thousands separators (e.g. 1,234). */
 export function formatNumber(n: number): string {
   return n.toLocaleString("en-US")

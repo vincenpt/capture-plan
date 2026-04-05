@@ -11,11 +11,18 @@ export interface PathConfig {
   date_scheme: DateScheme
 }
 
+/** Configuration for session document capture. */
+export interface SessionConfig {
+  enabled: boolean
+  path: string
+}
+
 /** Plugin configuration loaded from the 3-layer TOML config cascade. */
 export interface Config {
   vault?: string
   plan: PathConfig
   journal: PathConfig
+  session: SessionConfig
   context_cap?: number
   superpowers_spec_pattern?: string
   superpowers_plan_pattern?: string

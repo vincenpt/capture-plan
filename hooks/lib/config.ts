@@ -5,19 +5,27 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DATE_SCHEMES, type DateScheme } from "./dates.ts"
 import { filterNoiseTags } from "./text.ts"
-import { type Config, type ContextHintResult, PLUGIN_ROOT } from "./types.ts"
+import { type Config, type ContextHintResult, PLUGIN_ROOT, type SessionConfig } from "./types.ts"
 
 const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.toml")
 const USER_GLOBAL_CONFIG = join(homedir(), ".config", "capture-plan", "config.toml")
 
 const DEFAULT_PLAN_PATH = "Claude/Plans"
 const DEFAULT_JOURNAL_PATH = "Journal"
+const DEFAULT_SESSION_PATH = "Claude/Sessions"
 const DEFAULT_DATE_SCHEME: DateScheme = "calendar"
+
+/** Default session configuration (disabled by default). */
+const DEFAULT_SESSION_CONFIG: SessionConfig = {
+  enabled: false,
+  path: DEFAULT_SESSION_PATH,
+}
 
 /** Default plugin configuration for reference and testing. */
 export const DEFAULT_CONFIG: Config = {
   plan: { path: DEFAULT_PLAN_PATH, date_scheme: DEFAULT_DATE_SCHEME },
   journal: { path: DEFAULT_JOURNAL_PATH, date_scheme: DEFAULT_DATE_SCHEME },
+  session: DEFAULT_SESSION_CONFIG,
 }
 
 async function loadToml(path: string): Promise<Record<string, unknown> | null> {
@@ -62,10 +70,17 @@ export async function loadConfig(cwd?: string): Promise<Config> {
     (mergedJournal?.path as string) || (merged.journal_path as string) || DEFAULT_JOURNAL_PATH
   const journalScheme = resolveScheme(mergedJournal?.date_scheme)
 
+  // Resolve session config: grouped [session] table
+  const mergedSession = merged.session as Record<string, unknown> | undefined
+  const sessionEnabled = mergedSession?.enabled === true
+  const sessionPath = (mergedSession?.path as string) || DEFAULT_SESSION_PATH
+  const session: SessionConfig = { enabled: sessionEnabled, path: sessionPath }
+
   return {
     vault: (merged.vault as string) || undefined,
     plan: { path: planPath, date_scheme: planScheme },
     journal: { path: journalPath, date_scheme: journalScheme },
+    session,
     context_cap: contextCap,
     superpowers_spec_pattern: (merged.superpowers_spec_pattern as string) || undefined,
     superpowers_plan_pattern: (merged.superpowers_plan_pattern as string) || undefined,

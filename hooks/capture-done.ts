@@ -20,6 +20,7 @@ import {
   formatJournalRevision,
   formatModelLabel,
   formatModelYaml,
+  formatSessionYaml,
   formatTagsYaml,
   formatToolsLogContent,
   formatToolsNoteContent,
@@ -37,11 +38,11 @@ import {
   resolveContextCap,
   type SessionState,
   scanForVaultState,
-  shortSessionId,
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
   updateJournalFrontmatter,
+  upsertSessionDoc,
   writeVaultState,
 } from "./shared.ts"
 import {
@@ -129,9 +130,10 @@ async function buildSuperpowersState(
   const ccVersion = detectCcVersion() ?? readCcVersion(sessionId)
   const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
+  const spSessionYaml = formatSessionYaml(sessionId, config.session.enabled, config.session.path)
+
   const noteContent = `---
-created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}${spSessionYaml}${ccVersionYaml}${modelYaml}
 source: superpowers${primary.filePath ? `\nspec_file: "${primary.filePath}"` : ""}
 ---
 # ${title}
@@ -308,9 +310,10 @@ async function buildSkillState(
     .filter(Boolean)
     .join("\n\n---\n\n")
 
+  const skillSessionYaml = formatSessionYaml(sessionId, config.session.enabled, config.session.path)
+
   const noteContent = `---
-created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}${skillSessionYaml}${ccVersionYaml}${modelYaml}
 source: skill
 skills:
 ${skillsYaml}
@@ -787,6 +790,36 @@ ${contextText || "_No context captured_"}
       { date: state.date_key, day: getDayName(), project, tags: newTags },
       config.vault,
     )
+
+    // Create/update session document with all back-links
+    const planNoteName = state.source === "skill" ? "activity" : "plan"
+    upsertSessionDoc({
+      sessionId,
+      session: config.session,
+      vault: config.vault,
+      project,
+      summaries: [{ path: summaryPath, title: `Done: ${state.plan_title}` }],
+      ...(toolsNoteContent
+        ? {
+            toolsStats: [
+              {
+                path: `${state.plan_dir}/tools-stats`,
+                title: `Session Tools: ${state.plan_title}`,
+              },
+            ],
+          }
+        : {}),
+      ...(toolsLogResult
+        ? {
+            toolsLogs: [
+              { path: `${state.plan_dir}/tools-log`, title: `Tool Log: ${state.plan_title}` },
+            ],
+          }
+        : {}),
+      ...(state.source === "skill"
+        ? { activities: [{ path: `${state.plan_dir}/${planNoteName}`, title: state.plan_title }] }
+        : { plans: [{ path: `${state.plan_dir}/${planNoteName}`, title: state.plan_title }] }),
+    })
 
     // Clean up session state from vault
     deleteVaultState(state.plan_dir, config.vault)
