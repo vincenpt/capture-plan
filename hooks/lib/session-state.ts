@@ -48,6 +48,9 @@ export function parseStateFromFrontmatter(content: string): SessionState | null 
     skill_name: get("skill_name"),
   };
 
+  const completedRaw = get("completed");
+  if (completedRaw === "true") state.completed = true;
+
   const statsJson = get("plan_stats_json");
   if (statsJson) {
     try {
@@ -83,6 +86,7 @@ export function writeVaultState(state: SessionState, vault?: string): boolean {
     ["source", state.source],
     ["spec_path", state.spec_path],
     ["skill_name", state.skill_name],
+    ["completed", state.completed ? "true" : undefined],
   ];
   for (const [name, value] of props) {
     if (value) lines.push(`${name}: ${value}`);
@@ -118,6 +122,9 @@ export function scanForVaultState(sessionId: string, config: Config): SessionSta
       const state = parseStateFromFrontmatter(text);
       if (!state) continue;
 
+      // Completed states are permanent session records — skip entirely
+      if (state.completed) continue;
+
       // Housekeeping: remove stale state files
       const age = Date.now() - new Date(state.timestamp).getTime();
       if (age > STALE_STATE_MS) {
@@ -140,6 +147,11 @@ export function scanForVaultState(sessionId: string, config: Config): SessionSta
 /** Remove the state.md file from a plan directory after the Stop hook has consumed it. */
 export function deleteVaultState(planDir: string, vault?: string): void {
   runObsidian(["delete", `path=${planDir}/state.md`, "permanent"], vault);
+}
+
+/** Mark a state.md as completed by rewriting it with the completed flag set. */
+export function markVaultStateCompleted(state: SessionState, vault?: string): boolean {
+  return writeVaultState({ ...state, completed: true }, vault);
 }
 
 /** Extract structured fields (created, tags, counter, etc.) from a plan note's YAML frontmatter. */

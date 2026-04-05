@@ -503,6 +503,7 @@ function runHook(scriptName: string, payload: Record<string, unknown>): HookResu
     stdin: new Blob([input]),
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...process.env, CAPTURE_PLAN_MOCK_SUMMARIZE: "1" },
   });
 
   const stderr = result.stderr.toString();
@@ -763,6 +764,9 @@ async function main(): Promise<void> {
   const stateFile = join(planDirAbsolute, "state.md");
   const stateExists = existsSync(stateFile);
   record("capture-plan", "state.md exists (intermediate)", stateExists);
+
+  // Save state content before capture-done deletes it (for re-creation with completed flag)
+  const savedStateContent = stateExists ? readFileSync(stateFile, "utf8") : "";
   console.log("");
 
   // ---- Phase 3: capture-done ----
@@ -876,9 +880,17 @@ async function main(): Promise<void> {
     );
   }
 
-  // Validate state.md cleaned up
+  // Validate state.md cleaned up by capture-done
   const stateCleanedUp = !existsSync(stateFile);
   record("capture-done", "state.md cleaned up", stateCleanedUp);
+
+  // Re-create state.md with completed flag for vault inspection
+  if (stateCleanedUp && savedStateContent) {
+    const completedContent = savedStateContent.replace(/\n---\s*$/, "\ncompleted: true\n---");
+    const stateRel = `${planDir}/state`;
+    const recreated = createVaultNote(stateRel, completedContent, config.vault).success;
+    record("capture-done", "state.md re-created with completed flag", recreated);
+  }
   console.log("");
 
   // Validate journal
@@ -926,7 +938,7 @@ async function main(): Promise<void> {
     console.log("Cleanup: skipped (--skip-clean)");
     console.log(`  Test artifacts preserved at: ${planDir}/`);
     console.log(
-      "  Browse in Obsidian: plan.md, summary.md, tools-stats.md, tools-log.md, agents/, test-log.md",
+      "  Browse in Obsidian: plan.md, summary.md, tools-stats.md, tools-log.md, agents/, state.md, test-log.md",
     );
   } else {
     console.log("Cleanup");

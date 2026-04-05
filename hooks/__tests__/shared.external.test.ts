@@ -262,13 +262,12 @@ describe("summarizeWithClaude", () => {
     expect(result.tags).toBe("");
   });
 
-  it("falls back when summary exceeds 300 chars", async () => {
+  it("accepts long summaries from Haiku without truncation", async () => {
     const longSummary = "A".repeat(301);
     mockSpawn(`${longSummary}\ntag`, 0);
 
     const result = await summarizeWithClaude("Short content", "system prompt");
-    // The 300+ char summary triggers fallback
-    expect(result.summary).toBe("Short content");
+    expect(result.summary).toBe(longSummary);
   });
 
   it("strips code blocks in fallback", async () => {
