@@ -3,14 +3,6 @@
 
 import { type DateScheme, formatDatePath, getDatePartsFor } from "./dates.ts";
 import {
-  COMPACT_DATE_PATTERN,
-  DAY_ONLY_PATTERN,
-  FLAT_DATE_PATTERN,
-  NUM_NAME_PATTERN,
-  PLAN_DIR_PATTERN,
-  YEAR_PATTERN,
-} from "./fs.ts";
-import {
   ensureVaultDir,
   listVaultFiles,
   listVaultFolders,
@@ -18,6 +10,18 @@ import {
   vaultFileExists,
   vaultFolderExists,
 } from "./obsidian.ts";
+import {
+  COMPACT_DATE_PATTERN,
+  DAY_ONLY_PATTERN,
+  FLAT_DATE_PATTERN,
+  isCompactDateFile,
+  isDayOnlyFile,
+  isFlatDateFile,
+  isNumNameFile,
+  NUM_NAME_PATTERN,
+  PLAN_DIR_PATTERN,
+  YEAR_PATTERN,
+} from "./path-style.ts";
 
 /** Convert a date path from one scheme to another. Returns the new path segment, or null on parse failure. */
 function remapDatePath(
@@ -229,7 +233,7 @@ export function computeJournalMoves(
 
   if (fromScheme === "flat") {
     for (const file of listVaultFiles(baseRel, vault)) {
-      if (!/^\d{4}-\d{2}-\d{2}\.md$/.test(file)) continue;
+      if (!isFlatDateFile(file)) continue;
       const targetSeg = remapDatePath("flat", "", [file.replace(/\.md$/, "")], toScheme);
       if (!targetSeg) continue;
       moves.push({
@@ -262,7 +266,7 @@ function collectJournalMovesUnderYear(
 ): void {
   if (fromScheme === "compact") {
     for (const file of listVaultFiles(yearRel, vault)) {
-      if (!/^\d{2}-\d{2}\.md$/.test(file)) continue;
+      if (!isCompactDateFile(file)) continue;
       const targetSeg = remapDatePath("compact", year, [file.replace(/\.md$/, "")], toScheme);
       if (!targetSeg) continue;
       moves.push({
@@ -277,7 +281,7 @@ function collectJournalMovesUnderYear(
       const entryRel = `${yearRel}/${entry}`;
 
       for (const dayFile of listVaultFiles(entryRel, vault)) {
-        if (fromScheme === "calendar" && /^\d{2}-[A-Z][a-z]+\.md$/.test(dayFile)) {
+        if (fromScheme === "calendar" && isNumNameFile(dayFile)) {
           const targetSeg = remapDatePath(
             "calendar",
             year,
@@ -290,7 +294,7 @@ function collectJournalMovesUnderYear(
             to: `${baseRel}/${targetSeg}.md`,
             type: "journal-file",
           });
-        } else if (fromScheme === "monthly" && /^\d{2}\.md$/.test(dayFile)) {
+        } else if (fromScheme === "monthly" && isDayOnlyFile(dayFile)) {
           const targetSeg = remapDatePath(
             "monthly",
             year,

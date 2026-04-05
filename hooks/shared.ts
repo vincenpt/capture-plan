@@ -7,6 +7,7 @@ export * from "./lib/dates.ts";
 export * from "./lib/formatting.ts";
 export * from "./lib/fs.ts";
 export * from "./lib/obsidian.ts";
+export * from "./lib/path-style.ts";
 export * from "./lib/session-state.ts";
 export * from "./lib/text.ts";
 export * from "./lib/types.ts";
