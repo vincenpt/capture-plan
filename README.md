@@ -9,7 +9,7 @@ A Claude Code plugin that captures plans and execution summaries to an Obsidian 
 The plugin captures three types of Claude Code sessions:
 
 - **Plan mode**: On ExitPlanMode, captures the plan content, summarizes it with Claude Haiku, creates an Obsidian note with YAML frontmatter, and appends an entry to your daily journal. On Stop, creates a summary note with execution results, plus tools-stats, tools-log, and (if subagents were used) agent prompt notes.
-- **Superpowers**: Auto-detects [superpowers](https://github.com/anthropics/claude-code-superpowers) sessions by scanning the transcript for Write operations to spec/plan directories. Creates vault notes with `source: superpowers` metadata. Specs and plans get separate sibling notes.
+- **Superpowers**: Auto-detects [superpowers](https://github.com/obra/superpowers/tree/main?tab=readme-ov-file#superpowers) sessions by scanning the transcript for Write operations to spec/plan directories. Creates vault notes with `source: superpowers` metadata. Specs and plans get separate sibling notes.
 - **Skill capture**: Detects skill-only sessions and creates activity notes with a skill invocation table. Only skills listed in `capture_skills` are captured as standalone sessions; skills used during plan-mode or superpowers sessions are always captured as sibling notes.
 
 Notes are organized as (default `calendar` scheme):
