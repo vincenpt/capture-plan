@@ -32,6 +32,10 @@ All vault mutations (create, delete, move, append, property changes) MUST go thr
 
 To replace an existing vault file without creating numbered duplicates, use the move+create+delete pattern (see `createVaultNote` in `obsidian.ts`): move the old file to a backup path (frees the index entry synchronously), create the new file at the original path, then delete the backup.
 
+### Obsidian CLI Reference
+
+See `docs/obsidian-cli.md` for the full Obsidian CLI command reference, including documented mismatches between the official docs and actual behavior, and workarounds learned from this project. Consult this document when you need to understand a specific command and its usage. This document should be maintained — any time we encounter a new CLI quirk, workaround, or undocumented behavior, annotate it into the "Learned Behaviors & Workarounds" section.
+
 ### Hook Data Flow
 
 1. `capture-plan.ts` receives the ExitPlanMode payload via stdin JSON, extracts plan content, creates an Obsidian note at `<vault>/<plan.path>/<date_scheme_path>/<counter>-<slug>/plan.md`
