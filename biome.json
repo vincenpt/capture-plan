@@ -42,7 +42,7 @@
     "formatter": {
       "quoteStyle": "double",
       "trailingCommas": "all",
-      "semicolons": "always"
+      "semicolons": "asNeeded"
     }
   }
 }

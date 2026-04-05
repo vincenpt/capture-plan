@@ -1,7 +1,7 @@
 // migration.ts — Vault layout detection and migration utilities
 // All vault operations go through the Obsidian CLI to keep the vault index in sync.
 
-import { type DateScheme, formatDatePath, getDatePartsFor } from "./dates.ts";
+import { type DateScheme, formatDatePath, getDatePartsFor } from "./dates.ts"
 import {
   ensureVaultDir,
   listVaultFiles,
@@ -9,7 +9,7 @@ import {
   runObsidian,
   vaultFileExists,
   vaultFolderExists,
-} from "./obsidian.ts";
+} from "./obsidian.ts"
 import {
   isCompactDateDir,
   isCompactDateFile,
@@ -21,7 +21,7 @@ import {
   isNumNameFile,
   isPlanDir,
   isYearDir,
-} from "./path-style.ts";
+} from "./path-style.ts"
 
 /** Convert a date path from one scheme to another. Returns the new path segment, or null on parse failure. */
 function remapDatePath(
@@ -30,52 +30,52 @@ function remapDatePath(
   segments: string[],
   toScheme: DateScheme,
 ): string | null {
-  const date = parseDateFromPath(fromScheme, year, segments);
-  if (!date) return null;
-  return formatDatePath(toScheme, getDatePartsFor(date));
+  const date = parseDateFromPath(fromScheme, year, segments)
+  if (!date) return null
+  return formatDatePath(toScheme, getDatePartsFor(date))
 }
 
 /** Classify a directory entry under a year dir into its date scheme. */
 export function classifyDateEntry(entry: string, children?: string[]): DateScheme | undefined {
-  if (isCompactDateDir(entry)) return "compact";
+  if (isCompactDateDir(entry)) return "compact"
 
   if (isNumNameDir(entry) && children) {
     for (const child of children) {
-      if (isNumNameDir(child)) return "calendar";
-      if (isDayOnlyDir(child)) return "monthly";
+      if (isNumNameDir(child)) return "calendar"
+      if (isDayOnlyDir(child)) return "monthly"
     }
   }
 
-  return undefined;
+  return undefined
 }
 
 /** Scan a vault path to detect which date schemes are present via the Obsidian CLI. */
 export function detectVaultSchemes(baseRel: string, vault?: string): Set<DateScheme> {
-  const schemes = new Set<DateScheme>();
+  const schemes = new Set<DateScheme>()
 
-  const allFolders = listVaultFolders(baseRel, vault);
+  const allFolders = listVaultFolders(baseRel, vault)
 
   for (const entry of allFolders) {
     if (isFlatDateDir(entry)) {
-      schemes.add("flat");
-      continue;
+      schemes.add("flat")
+      continue
     }
 
-    if (!isYearDir(entry)) continue;
-    const yearRel = `${baseRel}/${entry}`;
+    if (!isYearDir(entry)) continue
+    const yearRel = `${baseRel}/${entry}`
 
     for (const dateEntry of listVaultFolders(yearRel, vault)) {
       if (isCompactDateDir(dateEntry)) {
-        schemes.add("compact");
+        schemes.add("compact")
       } else if (isNumNameDir(dateEntry)) {
-        const children = listVaultFolders(`${yearRel}/${dateEntry}`, vault);
-        const scheme = classifyDateEntry(dateEntry, children.length > 0 ? children : undefined);
-        if (scheme) schemes.add(scheme);
+        const children = listVaultFolders(`${yearRel}/${dateEntry}`, vault)
+        const scheme = classifyDateEntry(dateEntry, children.length > 0 ? children : undefined)
+        if (scheme) schemes.add(scheme)
       }
     }
   }
 
-  return schemes;
+  return schemes
 }
 
 /** Derive a Date from path components based on the source scheme.
@@ -87,37 +87,37 @@ export function parseDateFromPath(
 ): Date | null {
   try {
     if (scheme === "flat") {
-      const parts = segments[0].split("-").map(Number);
-      return new Date(parts[0], parts[1] - 1, parts[2], 12, 0);
+      const parts = segments[0].split("-").map(Number)
+      return new Date(parts[0], parts[1] - 1, parts[2], 12, 0)
     }
 
-    const y = parseInt(year, 10);
+    const y = parseInt(year, 10)
     switch (scheme) {
       case "compact": {
-        const [mm, dd] = segments[0].split("-").map(Number);
-        return new Date(y, mm - 1, dd, 12, 0);
+        const [mm, dd] = segments[0].split("-").map(Number)
+        return new Date(y, mm - 1, dd, 12, 0)
       }
       case "calendar": {
-        const mm = parseInt(segments[0].split("-")[0], 10);
-        const dd = parseInt(segments[1].split("-")[0], 10);
-        return new Date(y, mm - 1, dd, 12, 0);
+        const mm = parseInt(segments[0].split("-")[0], 10)
+        const dd = parseInt(segments[1].split("-")[0], 10)
+        return new Date(y, mm - 1, dd, 12, 0)
       }
       case "monthly": {
-        const mm = parseInt(segments[0].split("-")[0], 10);
-        const dd = parseInt(segments[1], 10);
-        return new Date(y, mm - 1, dd, 12, 0);
+        const mm = parseInt(segments[0].split("-")[0], 10)
+        const dd = parseInt(segments[1], 10)
+        return new Date(y, mm - 1, dd, 12, 0)
       }
     }
   } catch {
-    return null;
+    return null
   }
 }
 
 /** A planned file/directory move. Paths are vault-relative. */
 export interface MoveEntry {
-  from: string;
-  to: string;
-  type: "plan-dir" | "journal-file" | "loose";
+  from: string
+  to: string
+  type: "plan-dir" | "journal-file" | "loose"
 }
 
 /** Compute all moves needed to migrate plan directories from one scheme to another.
@@ -128,24 +128,24 @@ export function computePlanMoves(
   toScheme: DateScheme,
   vault?: string,
 ): MoveEntry[] {
-  const moves: MoveEntry[] = [];
-  if (fromScheme === toScheme) return moves;
+  const moves: MoveEntry[] = []
+  if (fromScheme === toScheme) return moves
 
   if (fromScheme === "flat") {
     for (const entry of listVaultFolders(baseRel, vault)) {
-      if (!isFlatDateDir(entry)) continue;
-      const entryRel = `${baseRel}/${entry}`;
+      if (!isFlatDateDir(entry)) continue
+      const entryRel = `${baseRel}/${entry}`
 
-      const targetSeg = remapDatePath("flat", "", [entry], toScheme);
-      if (!targetSeg) continue;
-      const targetRel = `${baseRel}/${targetSeg}`;
+      const targetSeg = remapDatePath("flat", "", [entry], toScheme)
+      if (!targetSeg) continue
+      const targetRel = `${baseRel}/${targetSeg}`
 
       for (const planEntry of listVaultFolders(entryRel, vault)) {
         moves.push({
           from: `${entryRel}/${planEntry}`,
           to: `${targetRel}/${planEntry}`,
           type: isPlanDir(planEntry) ? "plan-dir" : "loose",
-        });
+        })
       }
       // Also check for loose files
       for (const file of listVaultFiles(entryRel, vault)) {
@@ -153,20 +153,20 @@ export function computePlanMoves(
           from: `${entryRel}/${file}`,
           to: `${targetRel}/${file}`,
           type: "loose",
-        });
+        })
       }
     }
-    return moves;
+    return moves
   }
 
   for (const yearEntry of listVaultFolders(baseRel, vault)) {
-    if (!isYearDir(yearEntry)) continue;
-    const yearRel = `${baseRel}/${yearEntry}`;
+    if (!isYearDir(yearEntry)) continue
+    const yearRel = `${baseRel}/${yearEntry}`
 
-    collectPlanMovesUnderYear(yearRel, yearEntry, fromScheme, toScheme, baseRel, moves, vault);
+    collectPlanMovesUnderYear(yearRel, yearEntry, fromScheme, toScheme, baseRel, moves, vault)
   }
 
-  return moves;
+  return moves
 }
 
 function collectPlanMovesUnderYear(
@@ -179,37 +179,37 @@ function collectPlanMovesUnderYear(
   vault?: string,
 ): void {
   for (const dateEntry of listVaultFolders(yearRel, vault)) {
-    const dateRel = `${yearRel}/${dateEntry}`;
+    const dateRel = `${yearRel}/${dateEntry}`
 
     if (fromScheme === "compact" && isCompactDateDir(dateEntry)) {
-      const targetSeg = remapDatePath("compact", year, [dateEntry], toScheme);
-      if (!targetSeg) continue;
+      const targetSeg = remapDatePath("compact", year, [dateEntry], toScheme)
+      if (!targetSeg) continue
 
       for (const planEntry of listVaultFolders(dateRel, vault)) {
-        if (planEntry.startsWith(".")) continue;
+        if (planEntry.startsWith(".")) continue
         moves.push({
           from: `${dateRel}/${planEntry}`,
           to: `${baseRel}/${targetSeg}/${planEntry}`,
           type: isPlanDir(planEntry) ? "plan-dir" : "loose",
-        });
+        })
       }
     } else if ((fromScheme === "calendar" || fromScheme === "monthly") && isNumNameDir(dateEntry)) {
       for (const dayEntry of listVaultFolders(dateRel, vault)) {
-        const isCalendar = isNumNameDir(dayEntry);
-        const isMonthly = isDayOnlyDir(dayEntry);
+        const isCalendar = isNumNameDir(dayEntry)
+        const isMonthly = isDayOnlyDir(dayEntry)
 
         if ((fromScheme === "calendar" && isCalendar) || (fromScheme === "monthly" && isMonthly)) {
-          const targetSeg = remapDatePath(fromScheme, year, [dateEntry, dayEntry], toScheme);
-          if (!targetSeg) continue;
-          const dayRel = `${dateRel}/${dayEntry}`;
+          const targetSeg = remapDatePath(fromScheme, year, [dateEntry, dayEntry], toScheme)
+          if (!targetSeg) continue
+          const dayRel = `${dateRel}/${dayEntry}`
 
           for (const planEntry of listVaultFolders(dayRel, vault)) {
-            if (planEntry.startsWith(".")) continue;
+            if (planEntry.startsWith(".")) continue
             moves.push({
               from: `${dayRel}/${planEntry}`,
               to: `${baseRel}/${targetSeg}/${planEntry}`,
               type: isPlanDir(planEntry) ? "plan-dir" : "loose",
-            });
+            })
           }
         }
       }
@@ -225,31 +225,31 @@ export function computeJournalMoves(
   toScheme: DateScheme,
   vault?: string,
 ): MoveEntry[] {
-  const moves: MoveEntry[] = [];
-  if (fromScheme === toScheme) return moves;
+  const moves: MoveEntry[] = []
+  if (fromScheme === toScheme) return moves
 
   if (fromScheme === "flat") {
     for (const file of listVaultFiles(baseRel, vault)) {
-      if (!isFlatDateFile(file)) continue;
-      const targetSeg = remapDatePath("flat", "", [file.replace(/\.md$/, "")], toScheme);
-      if (!targetSeg) continue;
+      if (!isFlatDateFile(file)) continue
+      const targetSeg = remapDatePath("flat", "", [file.replace(/\.md$/, "")], toScheme)
+      if (!targetSeg) continue
       moves.push({
         from: `${baseRel}/${file}`,
         to: `${baseRel}/${targetSeg}.md`,
         type: "journal-file",
-      });
+      })
     }
-    return moves;
+    return moves
   }
 
   for (const yearEntry of listVaultFolders(baseRel, vault)) {
-    if (!isYearDir(yearEntry)) continue;
-    const yearRel = `${baseRel}/${yearEntry}`;
+    if (!isYearDir(yearEntry)) continue
+    const yearRel = `${baseRel}/${yearEntry}`
 
-    collectJournalMovesUnderYear(yearRel, yearEntry, fromScheme, toScheme, baseRel, moves, vault);
+    collectJournalMovesUnderYear(yearRel, yearEntry, fromScheme, toScheme, baseRel, moves, vault)
   }
 
-  return moves;
+  return moves
 }
 
 function collectJournalMovesUnderYear(
@@ -263,19 +263,19 @@ function collectJournalMovesUnderYear(
 ): void {
   if (fromScheme === "compact") {
     for (const file of listVaultFiles(yearRel, vault)) {
-      if (!isCompactDateFile(file)) continue;
-      const targetSeg = remapDatePath("compact", year, [file.replace(/\.md$/, "")], toScheme);
-      if (!targetSeg) continue;
+      if (!isCompactDateFile(file)) continue
+      const targetSeg = remapDatePath("compact", year, [file.replace(/\.md$/, "")], toScheme)
+      if (!targetSeg) continue
       moves.push({
         from: `${yearRel}/${file}`,
         to: `${baseRel}/${targetSeg}.md`,
         type: "journal-file",
-      });
+      })
     }
   } else {
     for (const entry of listVaultFolders(yearRel, vault)) {
-      if (!isNumNameDir(entry)) continue;
-      const entryRel = `${yearRel}/${entry}`;
+      if (!isNumNameDir(entry)) continue
+      const entryRel = `${yearRel}/${entry}`
 
       for (const dayFile of listVaultFiles(entryRel, vault)) {
         if (fromScheme === "calendar" && isNumNameFile(dayFile)) {
@@ -284,26 +284,26 @@ function collectJournalMovesUnderYear(
             year,
             [entry, dayFile.replace(/\.md$/, "")],
             toScheme,
-          );
-          if (!targetSeg) continue;
+          )
+          if (!targetSeg) continue
           moves.push({
             from: `${entryRel}/${dayFile}`,
             to: `${baseRel}/${targetSeg}.md`,
             type: "journal-file",
-          });
+          })
         } else if (fromScheme === "monthly" && isDayOnlyFile(dayFile)) {
           const targetSeg = remapDatePath(
             "monthly",
             year,
             [entry, dayFile.replace(/\.md$/, "")],
             toScheme,
-          );
-          if (!targetSeg) continue;
+          )
+          if (!targetSeg) continue
           moves.push({
             from: `${entryRel}/${dayFile}`,
             to: `${baseRel}/${targetSeg}.md`,
             type: "journal-file",
-          });
+          })
         }
       }
     }
@@ -317,12 +317,12 @@ function moveVaultFile(
   ensuredDirs: Set<string>,
   vault?: string,
 ): void {
-  const dir = toRel.split("/").slice(0, -1).join("/");
+  const dir = toRel.split("/").slice(0, -1).join("/")
   if (dir && !ensuredDirs.has(dir)) {
-    ensureVaultDir(dir, vault);
-    ensuredDirs.add(dir);
+    ensureVaultDir(dir, vault)
+    ensuredDirs.add(dir)
   }
-  runObsidian(["move", `path=${fromRel}`, `to=${toRel}`], vault);
+  runObsidian(["move", `path=${fromRel}`, `to=${toRel}`], vault)
 }
 
 /** Execute a list of moves via the Obsidian CLI.
@@ -330,17 +330,17 @@ function moveVaultFile(
  *  are merged (source files that don't exist in the target are moved over) and journal
  *  files are skipped. All paths in moves must be vault-relative. */
 export function executeMoves(moves: MoveEntry[], vault?: string): number {
-  let count = 0;
-  const ensuredDirs = new Set<string>();
+  let count = 0
+  const ensuredDirs = new Set<string>()
 
   for (const move of moves) {
-    if (move.from === move.to) continue;
+    if (move.from === move.to) continue
 
     if (move.type === "plan-dir" && vaultFolderExists(move.to, vault)) {
       // Merge: move individual files that don't exist at destination
       for (const file of listVaultFiles(move.from, vault)) {
         if (!vaultFileExists(`${move.to}/${file}`, vault)) {
-          moveVaultFile(`${move.from}/${file}`, `${move.to}/${file}`, ensuredDirs, vault);
+          moveVaultFile(`${move.from}/${file}`, `${move.to}/${file}`, ensuredDirs, vault)
         }
       }
       for (const sub of listVaultFolders(move.from, vault)) {
@@ -351,23 +351,23 @@ export function executeMoves(moves: MoveEntry[], vault?: string): number {
               `${move.to}/${sub}/${file}`,
               ensuredDirs,
               vault,
-            );
+            )
           }
         }
       }
       // Delete remaining source files via CLI
       for (const file of listVaultFiles(move.from, vault)) {
-        runObsidian(["delete", `path=${move.from}/${file}`, "permanent"], vault);
+        runObsidian(["delete", `path=${move.from}/${file}`, "permanent"], vault)
       }
       for (const sub of listVaultFolders(move.from, vault)) {
         for (const file of listVaultFiles(`${move.from}/${sub}`, vault)) {
-          runObsidian(["delete", `path=${move.from}/${sub}/${file}`, "permanent"], vault);
+          runObsidian(["delete", `path=${move.from}/${sub}/${file}`, "permanent"], vault)
         }
       }
     } else if (move.type === "plan-dir") {
       // Move each file individually (CLI operates on files, not directories)
       for (const file of listVaultFiles(move.from, vault)) {
-        moveVaultFile(`${move.from}/${file}`, `${move.to}/${file}`, ensuredDirs, vault);
+        moveVaultFile(`${move.from}/${file}`, `${move.to}/${file}`, ensuredDirs, vault)
       }
       for (const sub of listVaultFolders(move.from, vault)) {
         for (const file of listVaultFiles(`${move.from}/${sub}`, vault)) {
@@ -376,14 +376,14 @@ export function executeMoves(moves: MoveEntry[], vault?: string): number {
             `${move.to}/${sub}/${file}`,
             ensuredDirs,
             vault,
-          );
+          )
         }
       }
     } else if (!vaultFileExists(move.to, vault)) {
       // journal-file or loose: single file move
-      moveVaultFile(move.from, move.to, ensuredDirs, vault);
+      moveVaultFile(move.from, move.to, ensuredDirs, vault)
     }
-    count++;
+    count++
   }
-  return count;
+  return count
 }
