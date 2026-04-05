@@ -54,6 +54,56 @@ export function getVaultPath(vault?: string): string | null {
   }
 }
 
+/** List immediate child folder names under a vault folder. */
+export function listVaultFolders(folderRel: string, vault?: string): string[] {
+  const result = runObsidian(["folders", `folder=${folderRel}`], vault);
+  if (result.exitCode !== 0) return [];
+  const prefix = `${folderRel}/`;
+  const depth = folderRel.split("/").length + 1;
+  return result.stdout
+    .split("\n")
+    .filter((line) => {
+      if (!line?.startsWith(prefix)) return false;
+      return line.split("/").length === depth;
+    })
+    .map((line) => line.slice(prefix.length));
+}
+
+/** List immediate child file names under a vault folder (non-recursive). */
+export function listVaultFiles(folderRel: string, vault?: string): string[] {
+  const result = runObsidian(["files", `folder=${folderRel}`], vault);
+  if (result.exitCode !== 0) return [];
+  const prefix = `${folderRel}/`;
+  return result.stdout
+    .split("\n")
+    .filter((line) => {
+      if (!line?.startsWith(prefix)) return false;
+      const rest = line.slice(prefix.length);
+      return !rest.includes("/");
+    })
+    .map((line) => line.slice(prefix.length));
+}
+
+/** Check if a folder exists in the vault. */
+export function vaultFolderExists(folderRel: string, vault?: string): boolean {
+  const result = runObsidian(["folder", `path=${folderRel}`], vault);
+  return result.exitCode === 0;
+}
+
+/** Check if a file exists in the vault. */
+export function vaultFileExists(pathRel: string, vault?: string): boolean {
+  const result = runObsidian(["file", `path=${pathRel}`], vault);
+  return result.exitCode === 0;
+}
+
+/** Ensure a vault directory exists by creating and deleting a placeholder file.
+ *  The Obsidian CLI `create` command creates parent directories automatically. */
+export function ensureVaultDir(dirRel: string, vault?: string): void {
+  const placeholder = `${dirRel}/placeholder.md`;
+  runObsidian(["create", `path=${placeholder}`, "content=placeholder", "silent"], vault);
+  runObsidian(["delete", `path=${placeholder}`, "permanent"], vault);
+}
+
 /** Read existing tags from a daily note and merge in new ones, deduplicating. */
 export function mergeTagsOnDailyNote(newTags: string, journalPath: string, vault?: string): void {
   if (!journalPath) return;
