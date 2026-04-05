@@ -115,6 +115,38 @@ export function vaultFileExists(pathRel: string, vault?: string): boolean {
   return result.exitCode === 0;
 }
 
+/** Read the full content of a vault note via the Obsidian CLI. Returns null if the file doesn't exist or the CLI fails. */
+export function readVaultNote(pathRel: string, vault?: string): string | null {
+  const pathWithExt = ensureMdExt(pathRel);
+  const result = runObsidian(["read", `path=${pathWithExt}`], vault);
+  if (result.exitCode !== 0) return null;
+  return result.stdout || null;
+}
+
+/** Read a single frontmatter property from a vault note. Returns null on failure or if the property doesn't exist. */
+export function readVaultProperty(pathRel: string, name: string, vault?: string): string | null {
+  const pathWithExt = ensureMdExt(pathRel);
+  const result = runObsidian(["property:read", `name=${name}`, `path=${pathWithExt}`], vault);
+  if (result.exitCode !== 0) return null;
+  return result.stdout || null;
+}
+
+/** Set a single frontmatter property on a vault note via the Obsidian CLI. Returns true on success. */
+export function setVaultProperty(
+  pathRel: string,
+  name: string,
+  value: string,
+  type: string,
+  vault?: string,
+): boolean {
+  const pathWithExt = ensureMdExt(pathRel);
+  const result = runObsidian(
+    ["property:set", `name=${name}`, `value=${value}`, `type=${type}`, `path=${pathWithExt}`],
+    vault,
+  );
+  return result.exitCode === 0;
+}
+
 /** Ensure a vault directory exists by creating and deleting a placeholder file.
  *  The Obsidian CLI `create` command creates parent directories automatically. */
 export function ensureVaultDir(dirRel: string, vault?: string): void {
@@ -126,17 +158,11 @@ export function ensureVaultDir(dirRel: string, vault?: string): void {
 /** Read existing tags from a daily note and merge in new ones, deduplicating. */
 export function mergeTagsOnDailyNote(newTags: string, journalPath: string, vault?: string): void {
   if (!journalPath) return;
-  const pathWithExt = ensureMdExt(journalPath);
-  const tagsResult = runObsidian(["property:read", `name=tags`, `path=${pathWithExt}`], vault);
-  const existingTags = tagsResult.stdout
-    .split("\n")
-    .filter((l) => !l.startsWith("Error:") && l.trim());
+  const existingRaw = readVaultProperty(journalPath, "tags", vault);
+  const existingTags = existingRaw ? existingRaw.split("\n").filter((l) => l.trim()) : [];
   const mergedTags = mergeTags(existingTags, newTags);
   if (!mergedTags) return;
-  runObsidian(
-    ["property:set", `name=tags`, `value=${mergedTags}`, "type=list", `path=${pathWithExt}`],
-    vault,
-  );
+  setVaultProperty(journalPath, "tags", mergedTags, "list", vault);
 }
 
 /** Build the date directory path for plans using the configured scheme. */
@@ -182,47 +208,23 @@ export function updateJournalFrontmatter(
   vault?: string,
 ): void {
   if (!journalPath) return;
-  const pathWithExt = ensureMdExt(journalPath);
 
   // date and day: idempotent set
-  runObsidian(
-    ["property:set", `name=date`, `value=${props.date}`, "type=date", `path=${pathWithExt}`],
-    vault,
-  );
-  runObsidian(
-    ["property:set", `name=day`, `value=${props.day}`, "type=text", `path=${pathWithExt}`],
-    vault,
-  );
+  setVaultProperty(journalPath, "date", props.date, "date", vault);
+  setVaultProperty(journalPath, "day", props.day, "text", vault);
 
   // plans: read current count, increment by 1
-  const plansResult = runObsidian(["property:read", `name=plans`, `path=${pathWithExt}`], vault);
-  const currentPlans = parseInt(plansResult.stdout, 10) || 0;
-  runObsidian(
-    [
-      "property:set",
-      `name=plans`,
-      `value=${currentPlans + 1}`,
-      "type=number",
-      `path=${pathWithExt}`,
-    ],
-    vault,
-  );
+  const plansRaw = readVaultProperty(journalPath, "plans", vault);
+  const currentPlans = parseInt(plansRaw ?? "", 10) || 0;
+  setVaultProperty(journalPath, "plans", `${currentPlans + 1}`, "number", vault);
 
   // projects: read current list, add project if not present
   if (props.project) {
-    const projResult = runObsidian(
-      ["property:read", `name=projects`, `path=${pathWithExt}`],
-      vault,
-    );
-    const existingProjects = projResult.stdout
-      .split("\n")
-      .filter((l) => !l.startsWith("Error:") && l.trim());
+    const projRaw = readVaultProperty(journalPath, "projects", vault);
+    const existingProjects = projRaw ? projRaw.split("\n").filter((l) => l.trim()) : [];
     if (!existingProjects.includes(props.project)) {
       const merged = [...existingProjects, props.project].join(",");
-      runObsidian(
-        ["property:set", `name=projects`, `value=${merged}`, "type=list", `path=${pathWithExt}`],
-        vault,
-      );
+      setVaultProperty(journalPath, "projects", merged, "list", vault);
     }
   }
 

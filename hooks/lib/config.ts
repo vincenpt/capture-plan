@@ -81,6 +81,14 @@ export async function summarizeWithClaude(
   content: string,
   systemPrompt: string,
 ): Promise<{ summary: string; tags: string }> {
+  if (process.env.CAPTURE_PLAN_MOCK_SUMMARIZE) {
+    const stub = content
+      .replace(/```[\s\S]*?```/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return { summary: stub || "Mock summary", tags: "e2e-test" };
+  }
+
   let summary = "";
   let tags = "";
 
@@ -125,7 +133,7 @@ export async function summarizeWithClaude(
     /* fallback below */
   }
 
-  if (!summary || summary.length > 300) {
+  if (!summary) {
     summary = content
       .replace(/```[\s\S]*?```/g, " ")
       .replace(/^(?:#+\s*|\|.*\|$|\s*[-*]\s+)/gm, "")

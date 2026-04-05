@@ -290,6 +290,66 @@ describe("writeVaultState + parseStateFromFrontmatter skill round-trip", () => {
   });
 });
 
+describe("parseStateFromFrontmatter with unquoted values", () => {
+  it("parses Obsidian-native unquoted format", () => {
+    const content = [
+      "---",
+      "session_id: abc-123",
+      "plan_slug: my-plan",
+      "plan_title: My Plan Title",
+      "plan_dir: Claude/Plans/2026/04-05/001-my-plan",
+      "date_key: 2026/04-05",
+      `timestamp: ${new Date().toISOString()}`,
+      "source: skill",
+      "skill_name: simplify",
+      "---",
+    ].join("\n");
+    const parsed = shared.parseStateFromFrontmatter(content);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.session_id).toBe("abc-123");
+    expect(parsed?.plan_slug).toBe("my-plan");
+    expect(parsed?.plan_title).toBe("My Plan Title");
+    expect(parsed?.source).toBe("skill");
+    expect(parsed?.skill_name).toBe("simplify");
+  });
+
+  it("parses plan_stats_json in raw JSON format", () => {
+    const stats = { model: "haiku", durationMs: 120 };
+    const content = [
+      "---",
+      "session_id: sess-1",
+      "plan_slug: test",
+      "plan_title: Test",
+      "plan_dir: Claude/Plans/2026/04-05/001-test",
+      "date_key: 2026/04-05",
+      `timestamp: ${new Date().toISOString()}`,
+      `plan_stats_json: ${JSON.stringify(stats)}`,
+      "---",
+    ].join("\n");
+    const parsed = shared.parseStateFromFrontmatter(content);
+    expect(parsed?.planStats?.model).toBe("haiku");
+    expect(parsed?.planStats?.durationMs).toBe(120);
+  });
+
+  it("parses mixed quoted and unquoted values", () => {
+    const content = [
+      "---",
+      'session_id: "quoted-id"',
+      "plan_slug: unquoted-slug",
+      'plan_title: "Quoted Title"',
+      "plan_dir: Claude/Plans/2026/04-05/001-mixed",
+      "date_key: 2026/04-05",
+      `timestamp: ${new Date().toISOString()}`,
+      "---",
+    ].join("\n");
+    const parsed = shared.parseStateFromFrontmatter(content);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.session_id).toBe("quoted-id");
+    expect(parsed?.plan_slug).toBe("unquoted-slug");
+    expect(parsed?.plan_title).toBe("Quoted Title");
+  });
+});
+
 describe("deleteVaultState", () => {
   it("calls obsidian delete with correct path", () => {
     const calls: string[][] = [];

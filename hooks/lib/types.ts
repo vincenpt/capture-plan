@@ -39,6 +39,7 @@ export interface SessionState {
   source?: "plan-mode" | "superpowers" | "skill";
   spec_path?: string;
   skill_name?: string;
+  completed?: boolean;
 }
 
 /** Parsed YAML frontmatter fields from a plan note. */

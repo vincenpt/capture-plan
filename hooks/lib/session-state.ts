@@ -1,38 +1,12 @@
 // session-state.ts — Session state persistence and plan frontmatter parsing
 
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { TranscriptStats } from "../transcript.ts";
 import { formatDatePath, getDatePartsFor } from "./dates.ts";
-import { createVaultNote, getVaultPath, runObsidian } from "./obsidian.ts";
+import { createVaultNote, listVaultFolders, readVaultNote, runObsidian } from "./obsidian.ts";
 import { ensureMdExt } from "./text.ts";
 import type { Config, PlanFrontmatter, SessionState } from "./types.ts";
 
 const STALE_STATE_MS = 2 * 60 * 60 * 1000; // 2 hours
-
-function serializeStateToFrontmatter(state: SessionState): string {
-  const lines: string[] = ["---"];
-  lines.push(`session_id: "${state.session_id}"`);
-  lines.push(`plan_slug: "${state.plan_slug}"`);
-  lines.push(`plan_title: "${state.plan_title.replace(/"/g, '\\"')}"`);
-  lines.push(`plan_dir: "${state.plan_dir}"`);
-  lines.push(`date_key: "${state.date_key}"`);
-  lines.push(`timestamp: "${state.timestamp}"`);
-  if (state.journal_path) lines.push(`journal_path: "${state.journal_path}"`);
-  if (state.project) lines.push(`project: "${state.project}"`);
-  if (state.tags) lines.push(`tags: "${state.tags}"`);
-  if (state.model) lines.push(`model: "${state.model}"`);
-  if (state.cc_version) lines.push(`cc_version: "${state.cc_version}"`);
-  if (state.source) lines.push(`source: "${state.source}"`);
-  if (state.spec_path) lines.push(`spec_path: "${state.spec_path}"`);
-  if (state.skill_name) lines.push(`skill_name: "${state.skill_name}"`);
-  if (state.planStats) {
-    const json = JSON.stringify(state.planStats).replace(/"/g, '\\"');
-    lines.push(`plan_stats_json: "${json}"`);
-  }
-  lines.push("---");
-  return lines.join("\n");
-}
 
 /** Parse a SessionState from the YAML frontmatter of a vault state note. Returns null if missing or malformed. */
 export function parseStateFromFrontmatter(content: string): SessionState | null {
@@ -41,8 +15,12 @@ export function parseStateFromFrontmatter(content: string): SessionState | null 
   const fm = fmMatch[1];
 
   const get = (key: string): string | undefined => {
-    const m = fm.match(new RegExp(`^${key}:\\s*"(.*)"\\s*$`, "m"));
-    return m ? m[1] : undefined;
+    // Quoted value: key: "value" (legacy manual serialization)
+    const quoted = fm.match(new RegExp(`^${key}:\\s*"(.*)"\\s*$`, "m"));
+    if (quoted) return quoted[1];
+    // Unquoted value: key: value (Obsidian property:set format)
+    const unquoted = fm.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+    return unquoted ? unquoted[1].trim() : undefined;
   };
 
   const sessionId = get("session_id");
@@ -70,12 +48,20 @@ export function parseStateFromFrontmatter(content: string): SessionState | null 
     skill_name: get("skill_name"),
   };
 
+  const completedRaw = get("completed");
+  if (completedRaw === "true") state.completed = true;
+
   const statsJson = get("plan_stats_json");
   if (statsJson) {
     try {
-      state.planStats = JSON.parse(statsJson.replace(/\\"/g, '"')) as TranscriptStats;
+      state.planStats = JSON.parse(statsJson) as TranscriptStats;
     } catch {
-      /* ignore malformed stats */
+      try {
+        // Legacy format stored escaped quotes inside YAML double-quoted strings
+        state.planStats = JSON.parse(statsJson.replace(/\\"/g, '"')) as TranscriptStats;
+      } catch {
+        /* ignore malformed stats */
+      }
     }
   }
 
@@ -84,16 +70,36 @@ export function parseStateFromFrontmatter(content: string): SessionState | null 
 
 /** Persist session state as a frontmatter-only vault note for the Stop hook to discover. */
 export function writeVaultState(state: SessionState, vault?: string): boolean {
-  const content = serializeStateToFrontmatter(state);
-  return createVaultNote(`${state.plan_dir}/state`, content, vault).success;
+  const lines: string[] = ["---"];
+  const props: [string, string | undefined][] = [
+    ["session_id", state.session_id],
+    ["plan_slug", state.plan_slug],
+    ["plan_title", state.plan_title],
+    ["plan_dir", state.plan_dir],
+    ["date_key", state.date_key],
+    ["timestamp", state.timestamp],
+    ["journal_path", state.journal_path],
+    ["project", state.project],
+    ["tags", state.tags],
+    ["model", state.model],
+    ["cc_version", state.cc_version],
+    ["source", state.source],
+    ["spec_path", state.spec_path],
+    ["skill_name", state.skill_name],
+    ["completed", state.completed ? "true" : undefined],
+  ];
+  for (const [name, value] of props) {
+    if (value) lines.push(`${name}: ${value}`);
+  }
+  if (state.planStats) {
+    lines.push(`plan_stats_json: ${JSON.stringify(state.planStats)}`);
+  }
+  lines.push("---");
+  return createVaultNote(`${state.plan_dir}/state`, lines.join("\n"), vault).success;
 }
 
 /** Scan today's and yesterday's plan directories for a matching session state file, cleaning up stale entries. */
 export function scanForVaultState(sessionId: string, config: Config): SessionState | null {
-  const vaultPath = getVaultPath(config.vault);
-  if (!vaultPath) return null;
-
-  const planRoot = join(vaultPath, config.plan.path);
   let match: SessionState | null = null;
 
   // State files expire in 2h, so only scan today + yesterday (covers midnight crossover)
@@ -105,34 +111,33 @@ export function scanForVaultState(sessionId: string, config: Config): SessionSta
   });
 
   for (const dateSeg of recentDatePaths) {
-    const datePath = join(planRoot, dateSeg);
-    try {
-      for (const planDir of readdirSync(datePath, { withFileTypes: true })) {
-        if (!planDir.isDirectory()) continue;
-        const stateFile = join(datePath, planDir.name, "state.md");
-        try {
-          const text = readFileSync(stateFile, "utf8");
-          if (!text) continue;
-          const state = parseStateFromFrontmatter(text);
-          if (!state) continue;
+    const dateFolder = `${config.plan.path}/${dateSeg}`;
+    const planDirs = listVaultFolders(dateFolder, config.vault);
 
-          // Housekeeping: remove stale state files
-          const age = Date.now() - new Date(state.timestamp).getTime();
-          if (age > STALE_STATE_MS) {
-            const vaultRelative = `${config.plan.path}/${dateSeg}/${planDir.name}/state.md`;
-            runObsidian(["delete", `path=${vaultRelative}`, "permanent"], config.vault);
-            continue;
-          }
+    for (const dirName of planDirs) {
+      const stateRel = `${dateFolder}/${dirName}/state`;
+      const text = readVaultNote(stateRel, config.vault);
+      if (!text) continue;
 
-          if (state.session_id === sessionId) {
-            match = state;
-          }
-        } catch {
-          /* file doesn't exist or unreadable — skip */
-        }
+      const state = parseStateFromFrontmatter(text);
+      if (!state) continue;
+
+      // Completed states are permanent session records — skip entirely
+      if (state.completed) continue;
+
+      // Housekeeping: remove stale state files
+      const age = Date.now() - new Date(state.timestamp).getTime();
+      if (age > STALE_STATE_MS) {
+        runObsidian(
+          ["delete", `path=${dateFolder}/${dirName}/state.md`, "permanent"],
+          config.vault,
+        );
+        continue;
       }
-    } catch {
-      /* date directory doesn't exist — skip */
+
+      if (state.session_id === sessionId) {
+        match = state;
+      }
     }
   }
 
@@ -142,6 +147,11 @@ export function scanForVaultState(sessionId: string, config: Config): SessionSta
 /** Remove the state.md file from a plan directory after the Stop hook has consumed it. */
 export function deleteVaultState(planDir: string, vault?: string): void {
   runObsidian(["delete", `path=${planDir}/state.md`, "permanent"], vault);
+}
+
+/** Mark a state.md as completed by rewriting it with the completed flag set. */
+export function markVaultStateCompleted(state: SessionState, vault?: string): boolean {
+  return writeVaultState({ ...state, completed: true }, vault);
 }
 
 /** Extract structured fields (created, tags, counter, etc.) from a plan note's YAML frontmatter. */
