@@ -95,16 +95,41 @@ The plugin ships with a default config. Override settings at any of these locati
 # Obsidian vault name (run `obsidian vaults` to list available vaults)
 vault = "Personal"
 
-# Base path for plan notes inside the vault
-plan_path = "Claude/Plans"
+# Plan notes configuration
+[plan]
+path = "Claude/Plans"
+date_scheme = "calendar"   # calendar | compact | monthly | flat
 
-# Base path for journal entries inside the vault
-journal_path = "Journal"
+# Journal entries configuration
+[journal]
+path = "Journal"
+date_scheme = "calendar"   # calendar | compact | monthly | flat
 
 # Context window cap in tokens (auto-detected, override if needed)
 # Standard: 200000, Max/Enterprise: 1000000
 # context_cap = 1000000
+
+# Superpowers integration — auto-detected from transcript at session end.
+# Override patterns if superpowers writes to non-default directories.
+# superpowers_spec_pattern = "/superpowers/specs/"
+# superpowers_plan_pattern = "/superpowers/plans/"
+
+# Skills to capture as standalone sessions (whitelist).
+# Only skill-only sessions matching this list are captured.
+# Skills during plan-mode/superpowers sessions are always captured.
+# capture_skills = ["simplify"]
 ```
+
+The `date_scheme` setting controls how date segments are formatted in vault paths. Four schemes are available:
+
+| Scheme | Plan path example | Journal path example |
+|---|---|---|
+| `calendar` (default) | `Claude/Plans/2026/04-04/…` | `Journal/2026/04-04.md` |
+| `compact` | `Claude/Plans/2026/0404/…` | `Journal/2026/0404.md` |
+| `monthly` | `Claude/Plans/2026-04/04/…` | `Journal/2026-04/04.md` |
+| `flat` | `Claude/Plans/2026-04-04/…` | `Journal/2026-04-04.md` |
+
+Old flat keys (`plan_path`, `journal_path`) are still accepted for backward compatibility; the `[plan]`/`[journal]` tables take precedence.
 
 The `context_cap` setting controls the context window size shown in note frontmatter (e.g., `model: claude-opus-4-6 (1M)`). By default, the plugin assumes 200K and auto-detects 1M when a single turn exceeds 200K tokens. Set this explicitly if you're on Claude Max or Enterprise and want it to always show 1M.
 
@@ -115,6 +140,14 @@ These slash commands are available to all users when the plugin is installed.
 ### `/backport-journal`
 
 Imports plans from `~/.claude/plans/` into the Obsidian vault, creating both plan notes and daily journal entries. Walks you through filtering (by date range, project, or specific plans), choosing between AI-generated or fast text summaries, previewing with a dry run, and confirming before import. Already-imported plans are skipped automatically.
+
+### `/migrate-layout`
+
+Migrates existing vault plan directories and journal files from one date directory scheme to another. Use after changing `date_scheme` in `capture-plan.toml`. Previews all moves in a dry run, confirms with the user, then executes. Supports `--plan-only` and `--journal-only` flags to migrate a single path.
+
+### `/rewrite-journal`
+
+Reconstructs the daily journal for a selected day by reading all plan and summary notes for that date. Backs up the existing journal file before rewriting. Offers AI summaries (Claude Haiku) or fast text extraction. Walks through day selection, dry run preview, execution, and optional backup cleanup.
 
 ## Developer Commands
 
@@ -139,6 +172,10 @@ Runs the full hook lifecycle end-to-end against the real Obsidian vault: Session
 ### `/test-e2e-skip-clean`
 
 Same as `/test-e2e` but preserves all generated vault artifacts for manual inspection in Obsidian. Useful for debugging or verifying note formatting.
+
+### `/test-e2e-migration`
+
+Interactive roundtrip migration test with content integrity verification. Asks which path (plan/journal), detects the current date scheme on disk, lets you pick a target scheme, then runs a full roundtrip migration and back. Verifies MD5 hashes, file counts, directory counts, and stationary file integrity.
 
 ## License
 
