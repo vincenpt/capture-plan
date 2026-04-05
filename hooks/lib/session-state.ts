@@ -2,13 +2,7 @@
 
 import type { TranscriptStats } from "../transcript.ts";
 import { formatDatePath, getDatePartsFor } from "./dates.ts";
-import {
-  createVaultNote,
-  listVaultFolders,
-  readVaultNote,
-  runObsidian,
-  setVaultProperty,
-} from "./obsidian.ts";
+import { createVaultNote, listVaultFolders, readVaultNote, runObsidian } from "./obsidian.ts";
 import { ensureMdExt } from "./text.ts";
 import type { Config, PlanFrontmatter, SessionState } from "./types.ts";
 
@@ -57,11 +51,10 @@ export function parseStateFromFrontmatter(content: string): SessionState | null 
   const statsJson = get("plan_stats_json");
   if (statsJson) {
     try {
-      // Try parsing directly (Obsidian-native format)
       state.planStats = JSON.parse(statsJson) as TranscriptStats;
     } catch {
       try {
-        // Fall back to unescaping legacy format with escaped quotes
+        // Legacy format stored escaped quotes inside YAML double-quoted strings
         state.planStats = JSON.parse(statsJson.replace(/\\"/g, '"')) as TranscriptStats;
       } catch {
         /* ignore malformed stats */
@@ -74,10 +67,7 @@ export function parseStateFromFrontmatter(content: string): SessionState | null 
 
 /** Persist session state as a frontmatter-only vault note for the Stop hook to discover. */
 export function writeVaultState(state: SessionState, vault?: string): boolean {
-  const statePath = `${state.plan_dir}/state`;
-  const result = createVaultNote(statePath, "", vault);
-  if (!result.success) return false;
-
+  const lines: string[] = ["---"];
   const props: [string, string | undefined][] = [
     ["session_id", state.session_id],
     ["plan_slug", state.plan_slug],
@@ -95,14 +85,13 @@ export function writeVaultState(state: SessionState, vault?: string): boolean {
     ["skill_name", state.skill_name],
   ];
   for (const [name, value] of props) {
-    if (value) setVaultProperty(statePath, name, value, "text", vault);
+    if (value) lines.push(`${name}: ${value}`);
   }
-
   if (state.planStats) {
-    setVaultProperty(statePath, "plan_stats_json", JSON.stringify(state.planStats), "text", vault);
+    lines.push(`plan_stats_json: ${JSON.stringify(state.planStats)}`);
   }
-
-  return true;
+  lines.push("---");
+  return createVaultNote(`${state.plan_dir}/state`, lines.join("\n"), vault).success;
 }
 
 /** Scan today's and yesterday's plan directories for a matching session state file, cleaning up stale entries. */
