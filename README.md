@@ -6,13 +6,19 @@ A Claude Code plugin that captures plans and execution summaries to an Obsidian 
 
 ## What it does
 
-- **On ExitPlanMode**: Captures the plan content, summarizes it with Claude Haiku, creates an Obsidian note, and appends an entry to your daily journal.
-- **On Stop**: If a plan was executed during the session, captures the final summary as a companion note linked to the plan.
+The plugin captures three types of Claude Code sessions:
+
+- **Plan mode**: On ExitPlanMode, captures the plan content, summarizes it with Claude Haiku, creates an Obsidian note with YAML frontmatter, and appends an entry to your daily journal. On Stop, creates a summary note with execution results, plus tools-stats, tools-log, and (if subagents were used) agent prompt notes.
+- **Superpowers**: Auto-detects [superpowers](https://github.com/anthropics/claude-code-superpowers) sessions by scanning the transcript for Write operations to spec/plan directories. Creates vault notes with `source: superpowers` metadata. Specs and plans get separate sibling notes.
+- **Skill capture**: Detects skill-only sessions and creates activity notes with a skill invocation table. Only skills listed in `capture_skills` are captured as standalone sessions; skills used during plan-mode or superpowers sessions are always captured as sibling notes.
 
 Notes are organized as (default `calendar` scheme):
 ```
 Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/plan.md
 Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/summary.md
+Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/tools-stats.md
+Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/tools-log.md
+Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/agents/        (if subagents used)
 ```
 
 ## Prerequisites
@@ -79,7 +85,19 @@ After installation, confirm the hooks are active:
 
 - `/reload-plugins` output should include the capture-plan hooks in its count.
 - Enter plan mode, write a plan, and exit. Check that a note appears under `Claude/Plans/` in your vault.
-- Debug logs are written to `/tmp/capture-plan-debug.log` and `/tmp/capture-done-debug.log`.
+
+### Troubleshooting
+
+Debug logs with ISO timestamps are written to two files:
+
+- `/tmp/capture-plan-debug.log` — ExitPlanMode hook: plan extraction, Haiku summarization, vault note creation, journal appends
+- `/tmp/capture-done-debug.log` — Stop hook: transcript parsing, session type detection, summary/tools-stats/tools-log generation
+
+Logs accumulate across sessions. To start fresh:
+
+```sh
+rm /tmp/capture-plan-debug.log /tmp/capture-done-debug.log
+```
 
 ## Configuration
 
@@ -131,7 +149,70 @@ The `date_scheme` setting controls how date segments are formatted in vault path
 
 Old flat keys (`plan_path`, `journal_path`) are still accepted for backward compatibility; the `[plan]`/`[journal]` tables take precedence.
 
-The `context_cap` setting controls the context window size shown in note frontmatter (e.g., `model: claude-opus-4-6 (1M)`). By default, the plugin assumes 200K and auto-detects 1M when a single turn exceeds 200K tokens. Set this explicitly if you're on Claude Max or Enterprise and want it to always show 1M.
+The `context_cap` setting controls the context window size shown in note frontmatter (e.g., `model: claude-opus-4-6 (1M)`). By default, the plugin assumes 200K and auto-detects 1M when a single turn exceeds 200K tokens. Set this explicitly if you're on Claude Max or Enterprise and want it to always show 1M. Token usage (input, output, cache), peak context %, duration, model, and subagent count are all computed from the transcript and recorded in both the note frontmatter and the `tools-stats.md` companion note.
+
+## How it works
+
+### Session types
+
+The plugin uses two hooks that run at different points in a Claude Code session:
+
+1. **ExitPlanMode** (`capture-plan.ts`): Fires when you exit plan mode. Extracts the plan content, summarizes it with Claude Haiku, creates the vault note, and appends a journal entry. Writes a session state file that the Stop hook picks up later.
+2. **Stop** (`capture-done.ts`): Fires when the session ends. Detects the session type and creates companion notes:
+   - **Plan mode** — Reads the state file written by ExitPlanMode, parses the transcript for execution activity after the plan boundary, and creates the summary, tools-stats, and tools-log notes.
+   - **Superpowers** — No ExitPlanMode needed. Scans the transcript for Write tool calls whose `file_path` matches `superpowers_spec_pattern` or `superpowers_plan_pattern`. Creates the plan note on the fly, then captures execution results the same way as plan mode.
+   - **Skill-only** — Detected when the transcript contains Skill tool invocations but no plan-mode or superpowers activity. Filtered by the `capture_skills` whitelist. Creates an activity note with a skill invocation table, then captures execution results.
+
+A **SessionStart** hook (`capture-session-start.ts`) also runs at the beginning of each session to detect the context window size and Claude Code version, writing a hint file that downstream hooks use for metadata.
+
+### Companion notes
+
+Each captured session produces a directory of related notes:
+
+| Note | Description |
+|---|---|
+| `plan.md` | The captured plan content with AI-generated title, summary, and tags |
+| `activity.md` | Skill-only sessions: a table of skill invocations (time, name, args) with surrounding context |
+| `summary.md` | Execution results: AI-generated summary, list of files changed, session duration |
+| `tools-stats.md` | Session metrics: model, duration, token counts (in/out/cache), context %, subagent count, tool call/error totals, MCP servers. Planning and execution phases shown separately plus combined totals |
+| `tools-log.md` | Chronological tool call log: each turn shows timestamp, duration, token usage, justification text, and tool arguments as markdown tables. Bash commands appear as shell code fences |
+| `agents/` | Subagent prompts extracted into separate notes with their own frontmatter (subagent type, model, token/duration stats, backlink to the dispatching turn in tools-log) |
+| `spec.md` | Superpowers only: the spec file content, linked to the plan note |
+
+### Note frontmatter
+
+All notes include YAML frontmatter with Obsidian-compatible wikilinks. Key fields:
+
+| Field | Example | Notes |
+|---|---|---|
+| `created` | `"[[Journal/2026/04-April/04-Saturday\|2026-04-04 2:30 PM]]"` | Wikilink to daily journal |
+| `project` | `capture-plan` | Git repo name (auto-detected from cwd) |
+| `tags` | `- refactor` | AI-generated from plan/summary content |
+| `session` | `"[[Sessions/abc123]]"` | Session ID link |
+| `model` | `claude-opus-4-6 (1M)` | Model with context window label |
+| `context_pct` | `42` | Peak context window usage % |
+| `duration` | `"12m 34s"` | Session duration (summary, tools-stats) |
+| `cc_version` | `"1.0.28"` | Claude Code version |
+| `source` | `superpowers` or `skill` | Session type (absent for plan-mode) |
+| `spec_file` | `"/path/to/spec.md"` | Source spec path (superpowers only) |
+| `skills` | `- simplify` | Skill names (skill-only sessions) |
+| `tokens_in` | `45200` | Input tokens consumed |
+| `tokens_out` | `12800` | Output tokens generated |
+| `subagents` | `3` | Number of subagents dispatched |
+| `tools_used` | `87` | Total tool calls |
+| `total_errors` | `2` | Total tool errors |
+
+### Daily journal
+
+Journal entries are grouped by plan title as Obsidian callouts. Each callout contains timestamped revisions with the note type (plan, done, activity), model label, and AI summary:
+
+```markdown
+> [!note]+ Refactor auth middleware — *capture-plan*
+> **2:30 PM** [[plan|plan]] `opus-4-6 (1M)` Extract auth middleware into shared module #refactor
+> **2:45 PM** [[summary|done]] `opus-4-6 (1M)` Completed refactor, 4 files changed #refactor
+```
+
+Journal frontmatter tracks the date, day name, projects active that day, and aggregated tags from all sessions.
 
 ## Skills
 
