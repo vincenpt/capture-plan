@@ -14,11 +14,16 @@ The plugin captures three types of Claude Code sessions:
 
 Notes are organized as (default `calendar` scheme):
 ```
-Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/plan.md
-Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/summary.md
-Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/tools-stats.md
-Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/tools-log.md
-Claude/Plans/<yyyy>/<mm-Month>/<dd-Day>/<counter>-<slug>/agents/        (if subagents used)
+Claude/Plans/
+  └── <yyyy>/
+      └── <mm-Month>/
+          └── <dd-Day>/
+              └── <counter>-<slug>/
+                  ├── plan.md
+                  ├── summary.md
+                  ├── tools-stats.md
+                  ├── tools-log.md
+                  └── agents/          (if subagents used)
 ```
 
 ## Prerequisites
