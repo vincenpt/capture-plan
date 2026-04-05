@@ -73,6 +73,26 @@ export function stripTitleLine(content: string): string {
   return content;
 }
 
+/** Tags that provide no useful signal because they apply to every entry. */
+const NOISE_TAGS = new Set([
+  "claude-session",
+  "claude-code",
+  "claude",
+  "coding-session",
+  "code-session",
+  "ai-session",
+  "session",
+]);
+
+/** Remove noise tags from a comma-separated tag string. */
+export function filterNoiseTags(tagsCsv: string): string {
+  return tagsCsv
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => t && !NOISE_TAGS.has(t))
+    .join(",");
+}
+
 /** Format a comma-separated tag string as YAML list items (e.g. "  - tag1\n  - tag2"). */
 export function formatTagsYaml(tagsCsv: string): string {
   const tags = tagsCsv
@@ -98,7 +118,7 @@ export function mergeTags(existing: string[], newTagsCsv: string): string {
       merged.push(t);
     }
   }
-  return merged.join(",");
+  return filterNoiseTags(merged.join(","));
 }
 
 /** Extract the project directory name from a cwd path (e.g. "/foo/bar" -> "bar"). */

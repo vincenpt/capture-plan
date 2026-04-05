@@ -4,6 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DATE_SCHEMES, type DateScheme } from "./dates.ts";
+import { filterNoiseTags } from "./text.ts";
 import { type Config, type ContextHintResult, PLUGIN_ROOT } from "./types.ts";
 
 const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.toml");
@@ -118,7 +119,7 @@ export async function summarizeWithClaude(
     if (result.exitCode === 0 && !result.output.toLowerCase().includes("not logged in")) {
       const lines = result.output.trim().split("\n").filter(Boolean);
       if (lines.length >= 1) summary = lines[0].trim();
-      if (lines.length >= 2) tags = lines[lines.length - 1].trim();
+      if (lines.length >= 2) tags = filterNoiseTags(lines[lines.length - 1].trim());
     }
   } catch {
     /* fallback below */

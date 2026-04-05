@@ -4,6 +4,7 @@ import {
   escapeForObsidianAppend,
   escapeTableCell,
   extractTitle,
+  filterNoiseTags,
   formatHashtags,
   formatJournalCallout,
   formatJournalRevision,
@@ -184,6 +185,48 @@ describe("mergeTags", () => {
 
   it("preserves order: existing first, then new", () => {
     expect(mergeTags(["z", "a"], "m,b")).toBe("z,a,m,b");
+  });
+
+  it("filters noise tags from merged result", () => {
+    expect(mergeTags(["claude-session", "auth"], "config")).toBe("auth,config");
+  });
+
+  it("returns empty when all tags are noise", () => {
+    expect(mergeTags(["claude-session"], "session")).toBe("");
+  });
+});
+
+describe("filterNoiseTags", () => {
+  it("strips known noise tags", () => {
+    expect(filterNoiseTags("claude-session,auth")).toBe("auth");
+  });
+
+  it("preserves legitimate tags", () => {
+    expect(filterNoiseTags("auth,config")).toBe("auth,config");
+  });
+
+  it("returns empty for all-noise input", () => {
+    expect(filterNoiseTags("claude-session,coding-session")).toBe("");
+  });
+
+  it("returns empty for empty input", () => {
+    expect(filterNoiseTags("")).toBe("");
+  });
+
+  it("does not strip partial matches", () => {
+    expect(filterNoiseTags("claude-api,session-management")).toBe("claude-api,session-management");
+  });
+
+  it("strips all known noise tags", () => {
+    expect(
+      filterNoiseTags(
+        "claude-session,claude-code,claude,coding-session,code-session,ai-session,session",
+      ),
+    ).toBe("");
+  });
+
+  it("trims whitespace around tags", () => {
+    expect(filterNoiseTags(" claude-session , auth ")).toBe("auth");
   });
 });
 

@@ -13,6 +13,7 @@ import {
   ensureMdExt,
   extractTitle,
   FLAT_DATE_PATTERN,
+  filterNoiseTags,
   formatAmPm,
   formatDatePath,
   formatJournalRevision,
@@ -363,7 +364,7 @@ export async function rewriteJournal(
         }
       }
 
-      const planTags = fm.tags ? fm.tags.join(",") : "";
+      const planTags = fm.tags ? filterNoiseTags(fm.tags.join(",")) : "";
 
       const data: PlanDirData = {
         planDirName,
