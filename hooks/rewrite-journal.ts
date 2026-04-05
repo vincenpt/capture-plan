@@ -12,7 +12,6 @@ import {
   type Config,
   ensureMdExt,
   extractTitle,
-  FLAT_DATE_PATTERN,
   filterNoiseTags,
   formatAmPm,
   formatDatePath,
@@ -22,14 +21,15 @@ import {
   getJournalPathForDate,
   getVaultPath,
   isDir,
+  isFlatDateDir,
+  isPlanDir,
+  isYearDir,
   loadConfig,
-  PLAN_DIR_PATTERN,
   parsePlanFrontmatter,
   runObsidian,
   safeReaddir,
   summarizeWithClaude,
   updateJournalFrontmatter,
-  YEAR_PATTERN,
 } from "./shared.ts";
 
 /** Metadata for a day that has plan directories in the vault. */
@@ -82,7 +82,7 @@ export function parseArgs(argv: string[]): CliArgs {
 function findPlanDirsIn(dateDirPath: string): string[] {
   const results: string[] = [];
   for (const entry of safeReaddir(dateDirPath)) {
-    if (PLAN_DIR_PATTERN.test(entry) && isDir(join(dateDirPath, entry))) {
+    if (isPlanDir(entry) && isDir(join(dateDirPath, entry))) {
       results.push(entry);
     }
   }
@@ -116,7 +116,7 @@ function collectDateDirs(
 
   if (scheme === "flat") {
     for (const entry of safeReaddir(planRoot)) {
-      if (!FLAT_DATE_PATTERN.test(entry)) continue;
+      if (!isFlatDateDir(entry)) continue;
       const fullPath = join(planRoot, entry);
       if (!isDir(fullPath)) continue;
       results.push({ pathParts: [entry], fullPath });
@@ -126,7 +126,7 @@ function collectDateDirs(
 
   // Year-based schemes: calendar, compact, monthly
   for (const yearEntry of safeReaddir(planRoot)) {
-    if (!YEAR_PATTERN.test(yearEntry)) continue;
+    if (!isYearDir(yearEntry)) continue;
     const yearPath = join(planRoot, yearEntry);
     if (!isDir(yearPath)) continue;
 

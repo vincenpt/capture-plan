@@ -10,7 +10,6 @@ import {
   type Config,
   createVaultNote,
   extractTitle,
-  FLAT_DATE_PATTERN,
   formatJournalRevision,
   formatTagsYaml,
   getDatePartsFor,
@@ -21,9 +20,11 @@ import {
   getProjectName,
   getVaultPath,
   isDir,
+  isFlatDateDir,
+  isPlanDir,
+  isYearDir,
   loadConfig,
   nextCounter,
-  PLAN_DIR_PATTERN,
   padCounter,
   parsePlanFrontmatter,
   safeReaddir,
@@ -31,7 +32,6 @@ import {
   summarizeWithClaude,
   toSlug,
   updateJournalFrontmatter,
-  YEAR_PATTERN,
 } from "./shared.ts";
 
 /** Metadata for a plan file discovered in ~/.claude/plans/, including import status. */
@@ -140,7 +140,7 @@ function findPlanDirs(dirPath: string, depth: number, acc: string[] = []): strin
   for (const entry of safeReaddir(dirPath)) {
     const fullPath = join(dirPath, entry);
     if (!isDir(fullPath)) continue;
-    if (PLAN_DIR_PATTERN.test(entry)) {
+    if (isPlanDir(entry)) {
       acc.push(fullPath);
     } else {
       findPlanDirs(fullPath, depth + 1, acc);
@@ -174,13 +174,13 @@ export function getImportedSlugs(vaultPath: string, planPathRelative: string): S
     if (!isDir(entryPath)) continue;
 
     // Flat scheme: yyyy-mm-dd directories directly under base path
-    if (FLAT_DATE_PATTERN.test(entry)) {
+    if (isFlatDateDir(entry)) {
       collectSlugsFromPlanDirs(findPlanDirs(entryPath, 0), imported);
       continue;
     }
 
     // Other schemes: year directories containing date subdirs
-    if (!YEAR_PATTERN.test(entry)) continue;
+    if (!isYearDir(entry)) continue;
     collectSlugsFromPlanDirs(findPlanDirs(entryPath, 0), imported);
   }
   return imported;
