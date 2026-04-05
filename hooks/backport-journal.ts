@@ -317,7 +317,7 @@ export async function backportPlans(
       let tags: string;
       if (options.skipSummarize) {
         summary = fallbackSummary(content);
-        tags = "claude-session";
+        tags = "";
       } else {
         const res = await summarizeWithClaude(content, PLAN_SYSTEM_PROMPT);
         summary = res.summary;

@@ -133,7 +133,7 @@ export async function summarizeWithClaude(
       .slice(0, 200);
     if (!summary) summary = "Captured from Claude Code session.";
   }
-  if (!tags) tags = "claude-session";
+  if (!tags) tags = "";
   summary = summary.replace(/\n/g, " ").trim();
   return { summary, tags };
 }

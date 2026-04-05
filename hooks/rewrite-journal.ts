@@ -464,10 +464,10 @@ export async function rewriteJournal(
     const planResult = summaryResults.get(`${data.planDirName}:plan`);
     if (planResult) {
       planSummary = planResult.summary;
-      planSummaryTags = planResult.tags || data.planTags || "claude-session";
+      planSummaryTags = planResult.tags || data.planTags || "";
     } else {
       planSummary = fallbackSummary(data.primaryContent);
-      planSummaryTags = data.planTags || "claude-session";
+      planSummaryTags = data.planTags || "";
     }
 
     // Build plan revision

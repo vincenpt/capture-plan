@@ -248,7 +248,7 @@ describe("summarizeWithClaude", () => {
       "system prompt",
     );
     expect(result.summary).toBe("Some plan content here for fallback testing");
-    expect(result.tags).toBe("claude-session");
+    expect(result.tags).toBe("");
   });
 
   it("falls back when output contains 'not logged in'", async () => {
@@ -256,7 +256,7 @@ describe("summarizeWithClaude", () => {
 
     const result = await summarizeWithClaude("Fallback content", "system prompt");
     expect(result.summary).toBe("Fallback content");
-    expect(result.tags).toBe("claude-session");
+    expect(result.tags).toBe("");
   });
 
   it("falls back when summary exceeds 300 chars", async () => {
@@ -291,7 +291,7 @@ describe("summarizeWithClaude", () => {
 
     const result = await summarizeWithClaude("Content here", "system prompt");
     expect(result.summary).toBe("Content here");
-    expect(result.tags).toBe("claude-session");
+    expect(result.tags).toBe("");
   });
 
   it("uses last line as tags when output has more than 2 lines", async () => {
