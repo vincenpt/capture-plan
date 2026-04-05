@@ -68,7 +68,9 @@ export async function loadConfig(cwd?: string): Promise<Config> {
   };
 }
 
-/** Summarize content using Claude Haiku, returning a short summary and comma-separated tags. Falls back to text extraction on failure. */
+const SUMMARIZE_TIMEOUT_MS = 30_000;
+
+/** Summarize content using Claude Haiku, returning a short summary and comma-separated tags. Falls back to text extraction on failure or timeout. */
 export async function summarizeWithClaude(
   content: string,
   systemPrompt: string,
@@ -94,10 +96,22 @@ export async function summarizeWithClaude(
       ],
       { stdin: new Blob([content]), stdout: "pipe", stderr: "pipe" },
     );
-    const output = await new Response(proc.stdout).text();
-    const exitCode = await proc.exited;
-    if (exitCode === 0 && !output.toLowerCase().includes("not logged in")) {
-      const lines = output.trim().split("\n").filter(Boolean);
+    const timeout = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        proc.kill();
+        reject(new Error("summarize timed out"));
+      }, SUMMARIZE_TIMEOUT_MS);
+    });
+    const result = await Promise.race([
+      (async () => {
+        const output = await new Response(proc.stdout).text();
+        const exitCode = await proc.exited;
+        return { output, exitCode };
+      })(),
+      timeout,
+    ]);
+    if (result.exitCode === 0 && !result.output.toLowerCase().includes("not logged in")) {
+      const lines = result.output.trim().split("\n").filter(Boolean);
       if (lines.length >= 1) summary = lines[0].trim();
       if (lines.length >= 2) tags = lines[lines.length - 1].trim();
     }
