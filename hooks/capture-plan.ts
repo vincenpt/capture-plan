@@ -2,6 +2,7 @@
 // capture-plan.ts — Claude Code Hook for ExitPlanMode
 // Captures plans and persists them to Obsidian vault
 
+import { join } from "node:path";
 import { PLAN_SYSTEM_PROMPT } from "./lib/prompts.ts";
 import {
   appendOrCreateCallout,

@@ -431,53 +431,136 @@ function buildTranscript(_sessionId: string, planContent: string): string {
   return `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`;
 }
 
+// ---- Debug Log Monitoring ----
+
+const CAPTURE_PLAN_LOG = "/tmp/capture-plan-debug.log";
+const CAPTURE_DONE_LOG = "/tmp/capture-done-debug.log";
+
+/** Error patterns to detect in debug logs and stderr. */
+const ERROR_PATTERNS = [
+  /Fatal error:/,
+  /ReferenceError:/,
+  /TypeError:/,
+  /SyntaxError:/,
+  /Cannot find module/,
+  /is not defined/,
+  /is not a function/,
+];
+
+/** Returns the current byte size of a file, or 0 if it doesn't exist. */
+function logSize(path: string): number {
+  try {
+    return Bun.file(path).size;
+  } catch {
+    return 0;
+  }
+}
+
+/** Reads bytes appended to a log file since `offsetBytes`. */
+function readLogTail(path: string, offsetBytes: number): string {
+  try {
+    const buf = readFileSync(path);
+    if (buf.length <= offsetBytes) return "";
+    return buf.subarray(offsetBytes).toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+/** Scans text for error patterns and returns matching lines. */
+function findErrors(text: string): string[] {
+  if (!text) return [];
+  return text.split("\n").filter((line) => ERROR_PATTERNS.some((p) => p.test(line)));
+}
+
 // ---- Hook Runner ----
 
-function runHook(
-  scriptName: string,
-  payload: Record<string, unknown>,
-): { exitCode: number; stdout: string; stderr: string } {
+interface HookResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  logErrors: string[];
+  stderrErrors: string[];
+}
+
+function runHook(scriptName: string, payload: Record<string, unknown>): HookResult {
   const scriptPath = join(import.meta.dir, scriptName);
   const input = JSON.stringify(payload);
+
+  // Determine which debug log this hook writes to
+  const debugLogPath = scriptName.includes("capture-plan")
+    ? CAPTURE_PLAN_LOG
+    : scriptName.includes("capture-done")
+      ? CAPTURE_DONE_LOG
+      : CAPTURE_PLAN_LOG;
+  const logOffset = logSize(debugLogPath);
+
   const result = Bun.spawnSync(["bun", scriptPath], {
     stdin: new Blob([input]),
     stdout: "pipe",
     stderr: "pipe",
   });
+
+  const stderr = result.stderr.toString();
+  const logTail = readLogTail(debugLogPath, logOffset);
+
   return {
     exitCode: result.exitCode,
     stdout: result.stdout.toString(),
-    stderr: result.stderr.toString(),
+    stderr,
+    logErrors: findErrors(logTail),
+    stderrErrors: findErrors(stderr),
   };
+}
+
+/**
+ * Checks hook result for errors in debug log and stderr.
+ * Records a test check and prints error details so they appear in the session transcript.
+ */
+function checkHookErrors(phase: string, hookResult: HookResult): void {
+  const allErrors = [...hookResult.logErrors, ...hookResult.stderrErrors];
+  const unique = [...new Set(allErrors)];
+  const pass = unique.length === 0;
+  record(phase, "no errors in debug log or stderr", pass, pass ? "" : `${unique.length} error(s)`);
+  if (!pass) {
+    for (const line of unique) {
+      console.log(`    ⚠ ${line.trim()}`);
+    }
+  }
 }
 
 // ---- Journal Cleanup ----
 
-function removeJournalSection(title: string, journalFilePath: string): boolean {
+/** Removes callout blocks matching `> [!plan]+ {title}` from the journal file. */
+function removeJournalCallout(title: string, journalFilePath: string): boolean {
   try {
     let content = readFileSync(journalFilePath, "utf8");
-    const header = `### ${title}`;
+    const header = `> [!plan]+ ${title}`;
     let removed = false;
 
-    // Remove all matching sections (handles multiple e2e runs)
     while (content.includes(header)) {
       const lines = content.split("\n");
       let startIdx = -1;
       for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim() === header) {
-          startIdx = i > 0 && lines[i - 1].trim() === "" ? i - 1 : i;
+        if (lines[i] === header) {
+          // Include preceding blank lines
+          startIdx = i > 0 && lines[i - 1]?.trim() === "" ? i - 1 : i;
+          if (startIdx > 0 && lines[startIdx - 1]?.trim() === "") startIdx--;
           break;
         }
       }
       if (startIdx === -1) break;
 
-      let endIdx = lines.length;
-      for (let i = startIdx + 1; i < lines.length; i++) {
-        if (/^###?\s/.test(lines[i])) {
+      // Callout block continues while lines start with ">"
+      let endIdx = startIdx;
+      for (let i = startIdx; i < lines.length; i++) {
+        if (i > startIdx && !lines[i].startsWith(">") && lines[i].trim() !== "") {
           endIdx = i;
           break;
         }
+        endIdx = i + 1;
       }
+      // Consume trailing blank lines
       while (endIdx < lines.length && lines[endIdx]?.trim() === "") {
         endIdx++;
       }
@@ -609,6 +692,7 @@ async function main(): Promise<void> {
     cwd: tempCwd,
   };
   const ssResult = runHook("capture-session-start.ts", sessionStartPayload);
+  checkHookErrors("session-start", ssResult);
   const hintFile = contextHintPath(sessionId);
   const hintCreated = existsSync(hintFile);
   record(
@@ -636,6 +720,7 @@ async function main(): Promise<void> {
     cpResult.exitCode === 0,
     `exit=${cpResult.exitCode}`,
   );
+  checkHookErrors("capture-plan", cpResult);
 
   // Validate plan.md
   const planFile = join(planDirAbsolute, "plan.md");
@@ -684,6 +769,7 @@ async function main(): Promise<void> {
     cdResult.exitCode === 0,
     `exit=${cdResult.exitCode}`,
   );
+  checkHookErrors("capture-done", cdResult);
 
   // Validate summary.md
   const summaryFile = join(planDirAbsolute, "summary.md");
@@ -794,25 +880,24 @@ async function main(): Promise<void> {
 
   if (journalExists) {
     const journalContent = readFileSync(journalFile, "utf8");
-    const hasSection = journalContent.includes(`### ${PLAN_TITLE}`);
-    record("journal", "has plan section", hasSection);
+    const calloutHeader = `> [!plan]+ ${PLAN_TITLE}`;
+    const hasCallout = journalContent.includes(calloutHeader);
+    record("journal", "has plan callout", hasCallout);
 
-    // Count table rows in the plan section
-    if (hasSection) {
-      const sectionStart = journalContent.indexOf(`### ${PLAN_TITLE}`);
-      const sectionEnd = journalContent.indexOf("\n### ", sectionStart + 1);
+    if (hasCallout) {
+      // Count revision lines (bullets starting with "> - **")
+      const calloutStart = journalContent.indexOf(calloutHeader);
+      const calloutEnd = journalContent.indexOf("\n\n\n", calloutStart + 1);
       const section =
-        sectionEnd > -1
-          ? journalContent.slice(sectionStart, sectionEnd)
-          : journalContent.slice(sectionStart);
-      const tableRows = section
-        .split("\n")
-        .filter((l) => l.trim().startsWith("|") && !l.trim().startsWith("|---")).length;
+        calloutEnd > -1
+          ? journalContent.slice(calloutStart, calloutEnd)
+          : journalContent.slice(calloutStart);
+      const revisions = section.split("\n").filter((l) => l.startsWith("> - **")).length;
       record(
         "journal",
-        "has table rows",
-        tableRows >= 2,
-        `found ${tableRows} rows (expect ≥2: header + plan + summary)`,
+        "has revision entries",
+        revisions >= 1,
+        `found ${revisions} revision(s) (expect ≥1: plan entry)`,
       );
     }
   }
@@ -840,10 +925,10 @@ async function main(): Promise<void> {
       record("cleanup", "plan directory removed", !existsSync(planDirAbsolute));
     }
 
-    // Remove journal section
+    // Remove journal callout
     if (journalExists) {
-      const removed = removeJournalSection(PLAN_TITLE, journalFile);
-      record("cleanup", "journal section removed", removed);
+      const removed = removeJournalCallout(PLAN_TITLE, journalFile);
+      record("cleanup", "journal callout removed", removed);
     }
 
     // Remove temp files
