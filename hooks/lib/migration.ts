@@ -11,16 +11,16 @@ import {
   vaultFolderExists,
 } from "./obsidian.ts";
 import {
-  COMPACT_DATE_PATTERN,
-  DAY_ONLY_PATTERN,
-  FLAT_DATE_PATTERN,
+  isCompactDateDir,
   isCompactDateFile,
+  isDayOnlyDir,
   isDayOnlyFile,
+  isFlatDateDir,
   isFlatDateFile,
+  isNumNameDir,
   isNumNameFile,
-  NUM_NAME_PATTERN,
-  PLAN_DIR_PATTERN,
-  YEAR_PATTERN,
+  isPlanDir,
+  isYearDir,
 } from "./path-style.ts";
 
 /** Convert a date path from one scheme to another. Returns the new path segment, or null on parse failure. */
@@ -37,12 +37,12 @@ function remapDatePath(
 
 /** Classify a directory entry under a year dir into its date scheme. */
 export function classifyDateEntry(entry: string, children?: string[]): DateScheme | undefined {
-  if (COMPACT_DATE_PATTERN.test(entry)) return "compact";
+  if (isCompactDateDir(entry)) return "compact";
 
-  if (NUM_NAME_PATTERN.test(entry) && children) {
+  if (isNumNameDir(entry) && children) {
     for (const child of children) {
-      if (NUM_NAME_PATTERN.test(child)) return "calendar";
-      if (DAY_ONLY_PATTERN.test(child)) return "monthly";
+      if (isNumNameDir(child)) return "calendar";
+      if (isDayOnlyDir(child)) return "monthly";
     }
   }
 
@@ -56,18 +56,18 @@ export function detectVaultSchemes(baseRel: string, vault?: string): Set<DateSch
   const allFolders = listVaultFolders(baseRel, vault);
 
   for (const entry of allFolders) {
-    if (FLAT_DATE_PATTERN.test(entry)) {
+    if (isFlatDateDir(entry)) {
       schemes.add("flat");
       continue;
     }
 
-    if (!YEAR_PATTERN.test(entry)) continue;
+    if (!isYearDir(entry)) continue;
     const yearRel = `${baseRel}/${entry}`;
 
     for (const dateEntry of listVaultFolders(yearRel, vault)) {
-      if (COMPACT_DATE_PATTERN.test(dateEntry)) {
+      if (isCompactDateDir(dateEntry)) {
         schemes.add("compact");
-      } else if (NUM_NAME_PATTERN.test(dateEntry)) {
+      } else if (isNumNameDir(dateEntry)) {
         const children = listVaultFolders(`${yearRel}/${dateEntry}`, vault);
         const scheme = classifyDateEntry(dateEntry, children.length > 0 ? children : undefined);
         if (scheme) schemes.add(scheme);
@@ -133,7 +133,7 @@ export function computePlanMoves(
 
   if (fromScheme === "flat") {
     for (const entry of listVaultFolders(baseRel, vault)) {
-      if (!FLAT_DATE_PATTERN.test(entry)) continue;
+      if (!isFlatDateDir(entry)) continue;
       const entryRel = `${baseRel}/${entry}`;
 
       const targetSeg = remapDatePath("flat", "", [entry], toScheme);
@@ -144,7 +144,7 @@ export function computePlanMoves(
         moves.push({
           from: `${entryRel}/${planEntry}`,
           to: `${targetRel}/${planEntry}`,
-          type: PLAN_DIR_PATTERN.test(planEntry) ? "plan-dir" : "loose",
+          type: isPlanDir(planEntry) ? "plan-dir" : "loose",
         });
       }
       // Also check for loose files
@@ -160,7 +160,7 @@ export function computePlanMoves(
   }
 
   for (const yearEntry of listVaultFolders(baseRel, vault)) {
-    if (!YEAR_PATTERN.test(yearEntry)) continue;
+    if (!isYearDir(yearEntry)) continue;
     const yearRel = `${baseRel}/${yearEntry}`;
 
     collectPlanMovesUnderYear(yearRel, yearEntry, fromScheme, toScheme, baseRel, moves, vault);
@@ -181,7 +181,7 @@ function collectPlanMovesUnderYear(
   for (const dateEntry of listVaultFolders(yearRel, vault)) {
     const dateRel = `${yearRel}/${dateEntry}`;
 
-    if (fromScheme === "compact" && COMPACT_DATE_PATTERN.test(dateEntry)) {
+    if (fromScheme === "compact" && isCompactDateDir(dateEntry)) {
       const targetSeg = remapDatePath("compact", year, [dateEntry], toScheme);
       if (!targetSeg) continue;
 
@@ -190,16 +190,13 @@ function collectPlanMovesUnderYear(
         moves.push({
           from: `${dateRel}/${planEntry}`,
           to: `${baseRel}/${targetSeg}/${planEntry}`,
-          type: PLAN_DIR_PATTERN.test(planEntry) ? "plan-dir" : "loose",
+          type: isPlanDir(planEntry) ? "plan-dir" : "loose",
         });
       }
-    } else if (
-      (fromScheme === "calendar" || fromScheme === "monthly") &&
-      NUM_NAME_PATTERN.test(dateEntry)
-    ) {
+    } else if ((fromScheme === "calendar" || fromScheme === "monthly") && isNumNameDir(dateEntry)) {
       for (const dayEntry of listVaultFolders(dateRel, vault)) {
-        const isCalendar = NUM_NAME_PATTERN.test(dayEntry);
-        const isMonthly = DAY_ONLY_PATTERN.test(dayEntry);
+        const isCalendar = isNumNameDir(dayEntry);
+        const isMonthly = isDayOnlyDir(dayEntry);
 
         if ((fromScheme === "calendar" && isCalendar) || (fromScheme === "monthly" && isMonthly)) {
           const targetSeg = remapDatePath(fromScheme, year, [dateEntry, dayEntry], toScheme);
@@ -211,7 +208,7 @@ function collectPlanMovesUnderYear(
             moves.push({
               from: `${dayRel}/${planEntry}`,
               to: `${baseRel}/${targetSeg}/${planEntry}`,
-              type: PLAN_DIR_PATTERN.test(planEntry) ? "plan-dir" : "loose",
+              type: isPlanDir(planEntry) ? "plan-dir" : "loose",
             });
           }
         }
@@ -246,7 +243,7 @@ export function computeJournalMoves(
   }
 
   for (const yearEntry of listVaultFolders(baseRel, vault)) {
-    if (!YEAR_PATTERN.test(yearEntry)) continue;
+    if (!isYearDir(yearEntry)) continue;
     const yearRel = `${baseRel}/${yearEntry}`;
 
     collectJournalMovesUnderYear(yearRel, yearEntry, fromScheme, toScheme, baseRel, moves, vault);
@@ -277,7 +274,7 @@ function collectJournalMovesUnderYear(
     }
   } else {
     for (const entry of listVaultFolders(yearRel, vault)) {
-      if (!NUM_NAME_PATTERN.test(entry)) continue;
+      if (!isNumNameDir(entry)) continue;
       const entryRel = `${yearRel}/${entry}`;
 
       for (const dayFile of listVaultFiles(entryRel, vault)) {

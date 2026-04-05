@@ -18,8 +18,6 @@ import {
   YEAR_PATTERN,
 } from "../shared.ts";
 
-// -- Directory patterns --
-
 describe("PLAN_DIR_PATTERN", () => {
   it("matches 3-digit counter with slug", () => {
     expect(PLAN_DIR_PATTERN.test("001-my-plan")).toBe(true);
@@ -126,8 +124,6 @@ describe("DAY_ONLY_PATTERN", () => {
   });
 });
 
-// -- Directory predicates --
-
 describe("isPlanDir", () => {
   it("returns true for valid plan dir", () => {
     expect(isPlanDir("001-my-plan")).toBe(true);
@@ -187,8 +183,6 @@ describe("isDayOnlyDir", () => {
     expect(isDayOnlyDir("003")).toBe(false);
   });
 });
-
-// -- File-name predicates --
 
 describe("isFlatDateFile", () => {
   it("matches YYYY-MM-DD.md", () => {
