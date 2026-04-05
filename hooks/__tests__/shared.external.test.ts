@@ -4,7 +4,10 @@ import {
   createVaultNote,
   getVaultPath,
   mergeTagsOnDailyNote,
+  readVaultNote,
+  readVaultProperty,
   runObsidian,
+  setVaultProperty,
   summarizeWithClaude,
 } from "../shared.ts";
 
@@ -451,5 +454,116 @@ describe("mergeTagsOnDailyNote", () => {
     const readCall = spawnSyncSpy.mock.calls[0][0] as string[];
     const pathArg = readCall.find((a) => a.startsWith("path="));
     expect(pathArg).toBe("path=Journal/path.md");
+  });
+});
+
+describe("readVaultNote", () => {
+  let spawnSyncSpy: ReturnType<typeof spyOn>;
+
+  afterEach(() => {
+    spawnSyncSpy?.mockRestore();
+  });
+
+  it("returns content on success", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: "---\nkey: value\n---" }),
+    );
+
+    const result = readVaultNote("Plans/001/state", "vault");
+    expect(result).toBe("---\nkey: value\n---");
+
+    const cmd = spawnSyncSpy.mock.calls[0][0] as string[];
+    expect(cmd).toContain("read");
+    expect(cmd).toContain("path=Plans/001/state.md");
+    expect(cmd).toContain("vault=vault");
+  });
+
+  it("returns null on CLI failure", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: "Error: not found", exitCode: 1 }),
+    );
+
+    expect(readVaultNote("missing/file")).toBeNull();
+  });
+
+  it("returns null on empty stdout", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({ stdout: "" }));
+
+    expect(readVaultNote("empty/file")).toBeNull();
+  });
+
+  it("appends .md extension", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({ stdout: "content" }));
+
+    readVaultNote("Plans/001/state");
+    const cmd = spawnSyncSpy.mock.calls[0][0] as string[];
+    expect(cmd).toContain("path=Plans/001/state.md");
+  });
+});
+
+describe("readVaultProperty", () => {
+  let spawnSyncSpy: ReturnType<typeof spyOn>;
+
+  afterEach(() => {
+    spawnSyncSpy?.mockRestore();
+  });
+
+  it("returns property value on success", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: "my-session-id" }),
+    );
+
+    const result = readVaultProperty("Plans/001/state", "session_id", "vault");
+    expect(result).toBe("my-session-id");
+
+    const cmd = spawnSyncSpy.mock.calls[0][0] as string[];
+    expect(cmd).toContain("property:read");
+    expect(cmd).toContain("name=session_id");
+    expect(cmd).toContain("path=Plans/001/state.md");
+  });
+
+  it("returns null on failure", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: "Error: no such property", exitCode: 1 }),
+    );
+
+    expect(readVaultProperty("Plans/001/state", "missing")).toBeNull();
+  });
+
+  it("returns null on empty stdout", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({ stdout: "" }));
+
+    expect(readVaultProperty("Plans/001/state", "empty")).toBeNull();
+  });
+});
+
+describe("setVaultProperty", () => {
+  let spawnSyncSpy: ReturnType<typeof spyOn>;
+
+  afterEach(() => {
+    spawnSyncSpy?.mockRestore();
+  });
+
+  it("passes correct CLI args and returns true on success", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({}));
+
+    const result = setVaultProperty("Plans/001/state", "session_id", "abc-123", "text", "vault");
+    expect(result).toBe(true);
+
+    const cmd = spawnSyncSpy.mock.calls[0][0] as string[];
+    expect(cmd).toContain("property:set");
+    expect(cmd).toContain("name=session_id");
+    expect(cmd).toContain("value=abc-123");
+    expect(cmd).toContain("type=text");
+    expect(cmd).toContain("path=Plans/001/state.md");
+    expect(cmd).toContain("vault=vault");
+  });
+
+  it("returns false on failure", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: "Error: file not found", exitCode: 1 }),
+    );
+
+    expect(setVaultProperty("missing/file", "key", "val", "text")).toBe(false);
   });
 });
