@@ -370,6 +370,24 @@ describe("appendToJournal", () => {
     expect(calls[2].cmd).toContain("append");
   });
 
+  it("create call uses .md path", () => {
+    let callCount = 0;
+    spawnSyncSpy.mockImplementation(((cmd: string[], opts?: unknown) => {
+      calls.push({ cmd: [...cmd], opts });
+      callCount++;
+      return spawnSyncResult({
+        exitCode: callCount === 1 ? 1 : 0,
+        success: callCount !== 1,
+      });
+    }) as typeof Bun.spawnSync);
+
+    appendToJournal("content", "Journal/2026/04-April/04-Saturday");
+    const createCall = calls[1];
+    const pathArg = createCall.cmd.find((a: string) => a.startsWith("path="));
+    expect(pathArg).toBe("path=Journal/2026/04-April/04-Saturday.md");
+    expect(createCall.cmd).not.toContain("silent");
+  });
+
   it("appends .md extension if missing", () => {
     appendToJournal("content", "Journal/2026/03/29");
     const appendCall = calls[0];

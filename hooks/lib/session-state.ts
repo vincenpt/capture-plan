@@ -1,10 +1,11 @@
 // session-state.ts — Session state persistence and plan frontmatter parsing
 
-import { readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TranscriptStats } from "../transcript.ts";
 import { formatDatePath, getDatePartsFor } from "./dates.ts";
-import { createVaultNote, getVaultPath } from "./obsidian.ts";
+import { createVaultNote, getVaultPath, runObsidian } from "./obsidian.ts";
+import { ensureMdExt } from "./text.ts";
 import type { Config, PlanFrontmatter, SessionState } from "./types.ts";
 
 const STALE_STATE_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -118,11 +119,8 @@ export function scanForVaultState(sessionId: string, config: Config): SessionSta
           // Housekeeping: remove stale state files
           const age = Date.now() - new Date(state.timestamp).getTime();
           if (age > STALE_STATE_MS) {
-            try {
-              unlinkSync(stateFile);
-            } catch {
-              /* ignore */
-            }
+            const vaultRelative = `${config.plan.path}/${dateSeg}/${planDir.name}/state.md`;
+            runObsidian(["delete", `path=${vaultRelative}`, "permanent"], config.vault);
             continue;
           }
 
@@ -142,12 +140,8 @@ export function scanForVaultState(sessionId: string, config: Config): SessionSta
 }
 
 /** Remove the state.md file from a plan directory after the Stop hook has consumed it. */
-export function deleteVaultState(planDir: string, vaultPath: string): void {
-  try {
-    unlinkSync(join(vaultPath, planDir, "state.md"));
-  } catch {
-    /* ignore */
-  }
+export function deleteVaultState(planDir: string, vault?: string): void {
+  runObsidian(["delete", `path=${planDir}/state.md`, "permanent"], vault);
 }
 
 /** Extract structured fields (created, tags, counter, etc.) from a plan note's YAML frontmatter. */
@@ -197,11 +191,14 @@ export function parsePlanFrontmatter(content: string): PlanFrontmatter {
   return result;
 }
 
-/** Append a revision bullet to an existing callout block with the given title in the journal file. */
+/** Append a revision bullet to an existing callout block with the given title in the journal file.
+ *  Reads the file directly (safe for vault index), but writes back via Obsidian CLI to keep the vault in sync. */
 export async function appendRevisionToCallout(
   planTitle: string,
   revision: string,
   journalFilePath: string,
+  journalRelPath: string,
+  vault?: string,
 ): Promise<boolean> {
   try {
     const content = await Bun.file(journalFilePath).text();
@@ -228,7 +225,9 @@ export async function appendRevisionToCallout(
     // Insert the new revision lines after the last callout line
     const revisionLines = revision.split("\n");
     lines.splice(lastCalloutLine + 1, 0, ...revisionLines);
-    await Bun.write(journalFilePath, lines.join("\n"));
+
+    // Write back via Obsidian CLI (createVaultNote handles delete-before-create)
+    createVaultNote(ensureMdExt(journalRelPath), lines.join("\n"), vault);
     return true;
   } catch {
     return false;

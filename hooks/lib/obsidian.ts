@@ -24,14 +24,33 @@ export function runObsidian(
   }
 }
 
-/** Create a note in the vault at the given path, escaping newlines for the CLI. */
+/** Create or replace a note in the vault via the Obsidian CLI.
+ *  If the file already exists, moves it to a backup path first to free the index entry,
+ *  then creates the new file at the original path and deletes the backup.
+ *  Using delete+create directly causes a race condition where the indexer hasn't processed
+ *  the delete before the create arrives, producing numbered duplicates (e.g. "summary 1.md"). */
 export function createVaultNote(
   path: string,
   content: string,
   vault?: string,
 ): { success: boolean; exitCode: number; stdout: string; stderr: string } {
+  const pathWithExt = ensureMdExt(path);
+  const needsReplace = vaultFileExists(pathWithExt, vault);
+  const bakPath = pathWithExt.replace(/\.md$/, ".capture-plan-bak.md");
+
+  if (needsReplace) {
+    // Move frees the index entry synchronously (unlike delete)
+    runObsidian(["delete", `path=${bakPath}`, "permanent"], vault);
+    runObsidian(["move", `path=${pathWithExt}`, `to=${bakPath}`], vault);
+  }
+
   const escaped = content.replace(/\n/g, "\\n");
   const result = runObsidian(["create", `path=${path}`, `content=${escaped}`, "silent"], vault);
+
+  if (needsReplace) {
+    runObsidian(["delete", `path=${bakPath}`, "permanent"], vault);
+  }
+
   return {
     success: result.exitCode === 0,
     exitCode: result.exitCode,
@@ -52,6 +71,56 @@ export function getVaultPath(vault?: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** List immediate child folder names under a vault folder. */
+export function listVaultFolders(folderRel: string, vault?: string): string[] {
+  const result = runObsidian(["folders", `folder=${folderRel}`], vault);
+  if (result.exitCode !== 0) return [];
+  const prefix = `${folderRel}/`;
+  const depth = folderRel.split("/").length + 1;
+  return result.stdout
+    .split("\n")
+    .filter((line) => {
+      if (!line?.startsWith(prefix)) return false;
+      return line.split("/").length === depth;
+    })
+    .map((line) => line.slice(prefix.length));
+}
+
+/** List immediate child file names under a vault folder (non-recursive). */
+export function listVaultFiles(folderRel: string, vault?: string): string[] {
+  const result = runObsidian(["files", `folder=${folderRel}`], vault);
+  if (result.exitCode !== 0) return [];
+  const prefix = `${folderRel}/`;
+  return result.stdout
+    .split("\n")
+    .filter((line) => {
+      if (!line?.startsWith(prefix)) return false;
+      const rest = line.slice(prefix.length);
+      return !rest.includes("/");
+    })
+    .map((line) => line.slice(prefix.length));
+}
+
+/** Check if a folder exists in the vault. */
+export function vaultFolderExists(folderRel: string, vault?: string): boolean {
+  const result = runObsidian(["folder", `path=${folderRel}`], vault);
+  return result.exitCode === 0;
+}
+
+/** Check if a file exists in the vault. */
+export function vaultFileExists(pathRel: string, vault?: string): boolean {
+  const result = runObsidian(["file", `path=${pathRel}`], vault);
+  return result.exitCode === 0;
+}
+
+/** Ensure a vault directory exists by creating and deleting a placeholder file.
+ *  The Obsidian CLI `create` command creates parent directories automatically. */
+export function ensureVaultDir(dirRel: string, vault?: string): void {
+  const placeholder = `${dirRel}/placeholder.md`;
+  runObsidian(["create", `path=${placeholder}`, "content=placeholder", "silent"], vault);
+  runObsidian(["delete", `path=${placeholder}`, "permanent"], vault);
 }
 
 /** Read existing tags from a daily note and merge in new ones, deduplicating. */
@@ -93,7 +162,7 @@ export function appendToJournal(content: string, journalPath: string, vault?: st
   const result = runObsidian(["append", `path=${pathWithExt}`, `content=${escaped}`], vault);
   if (result.exitCode !== 0) {
     // File doesn't exist yet — create it, then append
-    runObsidian(["create", `path=${journalPath}`, "content= ", "silent"], vault);
+    runObsidian(["create", `path=${pathWithExt}`, "content= "], vault);
     runObsidian(["append", `path=${pathWithExt}`, `content=${escaped}`], vault);
   }
 }
@@ -175,7 +244,7 @@ export async function appendOrCreateCallout(
   let appended = false;
   if (vaultPath) {
     const fullJournalPath = join(vaultPath, ensureMdExt(journalPath));
-    appended = await appendRevisionToCallout(title, revision, fullJournalPath);
+    appended = await appendRevisionToCallout(title, revision, fullJournalPath, journalPath, vault);
   }
   if (!appended) {
     const callout = formatJournalCallout(title, project, source, revision);

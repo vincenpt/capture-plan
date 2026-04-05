@@ -1,9 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   classifyDateEntry,
-  cleanEmptyDirs,
   computeJournalMoves,
   computePlanMoves,
   detectVaultSchemes,
@@ -36,6 +35,169 @@ function touch(...paths: string[]): void {
   }
 }
 
+/** Walk a directory recursively and return all folder paths relative to root. */
+function walkFolders(dir: string, prefix = ""): string[] {
+  const folders: string[] = [];
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+        folders.push(rel);
+        folders.push(...walkFolders(join(dir, entry.name), rel));
+      }
+    }
+  } catch {
+    /* skip */
+  }
+  return folders;
+}
+
+/** Walk a directory recursively and return all file paths relative to root. */
+function walkFilePaths(dir: string, prefix = ""): string[] {
+  const files: string[] = [];
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        files.push(...walkFilePaths(join(dir, entry.name), rel));
+      } else {
+        files.push(rel);
+      }
+    }
+  } catch {
+    /* skip */
+  }
+  return files;
+}
+
+/**
+ * Mock Bun.spawnSync to simulate the Obsidian CLI using the real filesystem.
+ * The mock maps vault-relative paths to absolute paths under tempDir.
+ */
+function mockObsidianCli(): ReturnType<typeof spyOn> {
+  return spyOn(Bun, "spawnSync").mockImplementation(((cmd: string[]) => {
+    const ok = (stdout = "") => ({
+      exitCode: 0,
+      success: true,
+      stdout: Buffer.from(stdout),
+      stderr: Buffer.from(""),
+    });
+    const err = (msg = "Error: not found") => ({
+      exitCode: 1,
+      success: false,
+      stdout: Buffer.from(msg),
+      stderr: Buffer.from(""),
+    });
+
+    // Extract common args
+    const findArg = (prefix: string) =>
+      cmd.find((a: string) => a.startsWith(prefix))?.slice(prefix.length);
+    const command = cmd.find((a: string) => !a.startsWith("obsidian") && !a.startsWith("vault="));
+
+    if (command === "folders") {
+      const folder = findArg("folder=") ?? "";
+      const absDir = join(tempDir, folder);
+      try {
+        statSync(absDir);
+      } catch {
+        return err();
+      }
+      const all = walkFolders(absDir);
+      const lines = [folder, ...all.map((f) => `${folder}/${f}`)];
+      return ok(lines.join("\n"));
+    }
+
+    if (command === "files") {
+      const folder = findArg("folder=") ?? "";
+      const absDir = join(tempDir, folder);
+      try {
+        statSync(absDir);
+      } catch {
+        return err();
+      }
+      const all = walkFilePaths(absDir);
+      const lines = all.map((f) => `${folder}/${f}`);
+      return ok(lines.join("\n"));
+    }
+
+    if (command === "folder") {
+      const path = findArg("path=");
+      if (!path) return err();
+      const absDir = join(tempDir, path);
+      try {
+        const stat = statSync(absDir);
+        if (!stat.isDirectory()) return err();
+      } catch {
+        return err();
+      }
+      const info = findArg("info=");
+      if (info === "files") {
+        const files = walkFilePaths(absDir);
+        return ok(String(files.length));
+      }
+      if (info === "folders") {
+        const folders = walkFolders(absDir);
+        return ok(String(folders.length));
+      }
+      return ok(`path\t${path}\nfiles\t0\nfolders\t0\nsize\t0`);
+    }
+
+    if (command === "file") {
+      const path = findArg("path=");
+      if (!path) return err();
+      try {
+        const stat = statSync(join(tempDir, path));
+        if (!stat.isFile()) return err();
+        return ok(`path\t${path}`);
+      } catch {
+        return err();
+      }
+    }
+
+    if (command === "move") {
+      const pathArg = findArg("path=");
+      const toArg = findArg("to=");
+      if (pathArg && toArg) {
+        const absFrom = join(tempDir, pathArg);
+        const absTo = join(tempDir, toArg);
+        mkdirSync(join(absTo, ".."), { recursive: true });
+        renameSync(absFrom, absTo);
+      }
+      return ok();
+    }
+
+    if (command === "delete") {
+      const pathArg = findArg("path=");
+      if (pathArg) {
+        try {
+          rmSync(join(tempDir, pathArg), { recursive: true });
+        } catch {
+          /* ignore */
+        }
+      }
+      return ok();
+    }
+
+    if (command === "create") {
+      const pathArg = findArg("path=");
+      if (pathArg) {
+        const absPath = join(tempDir, pathArg);
+        mkdirSync(join(absPath, ".."), { recursive: true });
+        writeFileSync(absPath, findArg("content=") ?? "");
+      }
+      return ok();
+    }
+
+    if (command === "vault") {
+      const info = findArg("info=");
+      if (info === "path") return ok(tempDir);
+      return ok();
+    }
+
+    return ok();
+  }) as typeof Bun.spawnSync);
+}
+
 describe("classifyDateEntry", () => {
   it("classifies compact entries", () => {
     expect(classifyDateEntry("04-03")).toBe("compact");
@@ -57,43 +219,51 @@ describe("classifyDateEntry", () => {
 });
 
 describe("detectVaultSchemes", () => {
+  let spy: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    spy = mockObsidianCli();
+  });
+  afterEach(() => {
+    spy?.mockRestore();
+  });
+
   it("detects compact scheme", () => {
-    mkdirs("2026/04-03/001-test");
-    const schemes = detectVaultSchemes(tempDir);
+    mkdirs("base/2026/04-03/001-test");
+    const schemes = detectVaultSchemes("base");
     expect(schemes.has("compact")).toBe(true);
     expect(schemes.size).toBe(1);
   });
 
   it("detects calendar scheme", () => {
-    mkdirs("2026/04-April/03-Friday/001-test");
-    const schemes = detectVaultSchemes(tempDir);
+    mkdirs("base/2026/04-April/03-Friday/001-test");
+    const schemes = detectVaultSchemes("base");
     expect(schemes.has("calendar")).toBe(true);
     expect(schemes.size).toBe(1);
   });
 
   it("detects monthly scheme", () => {
-    mkdirs("2026/04-April/03/001-test");
-    const schemes = detectVaultSchemes(tempDir);
+    mkdirs("base/2026/04-April/03/001-test");
+    const schemes = detectVaultSchemes("base");
     expect(schemes.has("monthly")).toBe(true);
     expect(schemes.size).toBe(1);
   });
 
   it("detects flat scheme", () => {
-    mkdirs("2026-04-03/001-test");
-    const schemes = detectVaultSchemes(tempDir);
+    mkdirs("base/2026-04-03/001-test");
+    const schemes = detectVaultSchemes("base");
     expect(schemes.has("flat")).toBe(true);
   });
 
   it("detects multiple schemes in mixed vault", () => {
-    mkdirs("2026/04-03/001-test", "2026/04-April/04-Saturday/002-other");
-    const schemes = detectVaultSchemes(tempDir);
+    mkdirs("base/2026/04-03/001-test", "base/2026/04-April/04-Saturday/002-other");
+    const schemes = detectVaultSchemes("base");
     expect(schemes.has("compact")).toBe(true);
     expect(schemes.has("calendar")).toBe(true);
     expect(schemes.size).toBe(2);
   });
 
   it("returns empty set for non-existent path", () => {
-    const schemes = detectVaultSchemes("/nonexistent/path");
+    const schemes = detectVaultSchemes("nonexistent");
     expect(schemes.size).toBe(0);
   });
 });
@@ -132,110 +302,109 @@ describe("parseDateFromPath", () => {
 });
 
 describe("computePlanMoves", () => {
+  let spy: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    spy = mockObsidianCli();
+  });
+  afterEach(() => {
+    spy?.mockRestore();
+  });
+
   it("computes moves from compact to calendar", () => {
-    mkdirs("2026/04-03/001-test-plan");
-    const moves = computePlanMoves(tempDir, "compact", "calendar");
+    mkdirs("base/2026/04-03/001-test-plan");
+    const moves = computePlanMoves("base", "compact", "calendar");
     expect(moves.length).toBe(1);
     expect(moves[0].from).toContain("04-03/001-test-plan");
     expect(moves[0].to).toContain("04-April/03-Friday/001-test-plan");
   });
 
   it("returns empty for same scheme", () => {
-    mkdirs("2026/04-03/001-test");
-    const moves = computePlanMoves(tempDir, "compact", "compact");
+    mkdirs("base/2026/04-03/001-test");
+    const moves = computePlanMoves("base", "compact", "compact");
     expect(moves.length).toBe(0);
   });
 
   it("handles multiple plans in one day", () => {
-    mkdirs("2026/04-03/001-first", "2026/04-03/002-second");
-    const moves = computePlanMoves(tempDir, "compact", "calendar");
+    mkdirs("base/2026/04-03/001-first", "base/2026/04-03/002-second");
+    const moves = computePlanMoves("base", "compact", "calendar");
     expect(moves.length).toBe(2);
   });
 
   it("computes moves from calendar to compact", () => {
-    mkdirs("2026/04-April/03-Friday/001-test-plan");
-    const moves = computePlanMoves(tempDir, "calendar", "compact");
+    mkdirs("base/2026/04-April/03-Friday/001-test-plan");
+    const moves = computePlanMoves("base", "calendar", "compact");
     expect(moves.length).toBe(1);
     expect(moves[0].to).toContain("04-03/001-test-plan");
   });
 
   it("computes moves from flat to calendar", () => {
-    mkdirs("2026-04-03/001-test-plan");
-    const moves = computePlanMoves(tempDir, "flat", "calendar");
+    mkdirs("base/2026-04-03/001-test-plan");
+    const moves = computePlanMoves("base", "flat", "calendar");
     expect(moves.length).toBe(1);
     expect(moves[0].from).toContain("2026-04-03/001-test-plan");
     expect(moves[0].to).toContain("04-April/03-Friday/001-test-plan");
   });
 
   it("computes moves from calendar to flat", () => {
-    mkdirs("2026/04-April/03-Friday/001-test-plan");
-    const moves = computePlanMoves(tempDir, "calendar", "flat");
+    mkdirs("base/2026/04-April/03-Friday/001-test-plan");
+    const moves = computePlanMoves("base", "calendar", "flat");
     expect(moves.length).toBe(1);
     expect(moves[0].to).toContain("2026-04-03/001-test-plan");
   });
 });
 
 describe("computeJournalMoves", () => {
+  let spy: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    spy = mockObsidianCli();
+  });
+  afterEach(() => {
+    spy?.mockRestore();
+  });
+
   it("computes moves from compact to calendar", () => {
-    touch("2026/03-29.md");
-    const moves = computeJournalMoves(tempDir, "compact", "calendar");
+    touch("base/2026/03-29.md");
+    const moves = computeJournalMoves("base", "compact", "calendar");
     expect(moves.length).toBe(1);
     expect(moves[0].from).toContain("03-29.md");
     expect(moves[0].to).toContain("03-March/29-Sunday.md");
   });
 
   it("computes moves from calendar to compact", () => {
-    touch("2026/03-March/29-Sunday.md");
-    const moves = computeJournalMoves(tempDir, "calendar", "compact");
+    touch("base/2026/03-March/29-Sunday.md");
+    const moves = computeJournalMoves("base", "calendar", "compact");
     expect(moves.length).toBe(1);
     expect(moves[0].to).toContain("03-29.md");
   });
 
   it("returns empty for same scheme", () => {
-    touch("2026/03-March/29-Sunday.md");
-    const moves = computeJournalMoves(tempDir, "calendar", "calendar");
+    touch("base/2026/03-March/29-Sunday.md");
+    const moves = computeJournalMoves("base", "calendar", "calendar");
     expect(moves.length).toBe(0);
   });
 });
 
 describe("executeMoves", () => {
-  it("moves directories to new locations", () => {
-    const from = join(tempDir, "src/001-test");
-    const to = join(tempDir, "dst/001-test");
-    mkdirSync(from, { recursive: true });
-    writeFileSync(join(from, "plan.md"), "test");
+  let spy: ReturnType<typeof spyOn>;
+  beforeEach(() => {
+    spy = mockObsidianCli();
+  });
+  afterEach(() => {
+    spy?.mockRestore();
+  });
 
-    const count = executeMoves([{ from, to, type: "plan-dir" }]);
+  it("moves directories to new locations", () => {
+    mkdirSync(join(tempDir, "src/001-test"), { recursive: true });
+    writeFileSync(join(tempDir, "src/001-test/plan.md"), "test");
+
+    const count = executeMoves([{ from: "src/001-test", to: "dst/001-test", type: "plan-dir" }]);
     expect(count).toBe(1);
-    expect(readdirSync(to)).toContain("plan.md");
+    expect(readdirSync(join(tempDir, "dst/001-test"))).toContain("plan.md");
   });
 
   it("skips moves where from equals to", () => {
-    const path = join(tempDir, "same/001-test");
-    mkdirSync(path, { recursive: true });
-    const count = executeMoves([{ from: path, to: path, type: "plan-dir" }]);
+    mkdirSync(join(tempDir, "same/001-test"), { recursive: true });
+    const count = executeMoves([{ from: "same/001-test", to: "same/001-test", type: "plan-dir" }]);
     expect(count).toBe(0);
-  });
-});
-
-describe("cleanEmptyDirs", () => {
-  it("removes empty parent directories", () => {
-    const deep = join(tempDir, "a/b/c");
-    mkdirSync(deep, { recursive: true });
-    const removed = cleanEmptyDirs([join(deep, "file.txt")], tempDir);
-    expect(removed).toBe(3); // c, b, a
-  });
-
-  it("stops at non-empty directories", () => {
-    const deep = join(tempDir, "a/b/c");
-    mkdirSync(deep, { recursive: true });
-    writeFileSync(join(tempDir, "a/keep.txt"), "keep");
-    const removed = cleanEmptyDirs([join(deep, "file.txt")], tempDir);
-    expect(removed).toBe(2); // c, b — stops at a because it has keep.txt
-  });
-
-  it("stops at basePath", () => {
-    const removed = cleanEmptyDirs([join(tempDir, "file.txt")], tempDir);
-    expect(removed).toBe(0);
   });
 });

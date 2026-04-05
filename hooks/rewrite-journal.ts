@@ -2,7 +2,7 @@
 // rewrite-journal.ts — Rewrite a day's journal from existing plan/summary/activity notes
 // CLI script (not a hook). Run via: bun hooks/rewrite-journal.ts [options]
 
-import { existsSync, readFileSync, renameSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DateScheme } from "./lib/dates.ts";
 import { parseDateFromPath } from "./lib/migration.ts";
@@ -25,6 +25,7 @@ import {
   loadConfig,
   PLAN_DIR_PATTERN,
   parsePlanFrontmatter,
+  runObsidian,
   safeReaddir,
   summarizeWithClaude,
   updateJournalFrontmatter,
@@ -311,9 +312,17 @@ export async function rewriteJournal(
     return result;
   }
 
-  // Backup existing journal
+  // Backup existing journal via Obsidian CLI to keep the vault index in sync.
+  // Using renameSync would leave a stale index entry, causing obsidian create
+  // to generate numbered duplicates (e.g. "04-Saturday 1.md").
+  const journalPathWithExt = ensureMdExt(journalPath);
+  const backupVaultPath = journalPathWithExt.replace(/\.md$/, ".bak.md");
   if (existsSync(journalFullPath) && !options.dryRun) {
-    renameSync(journalFullPath, backupPath);
+    // Remove any prior backup so move doesn't fail
+    if (existsSync(backupPath)) {
+      runObsidian(["delete", `path=${backupVaultPath}`], config.vault);
+    }
+    runObsidian(["move", `path=${journalPathWithExt}`, `to=${backupVaultPath}`], config.vault);
     result.backedUp = true;
   } else if (existsSync(journalFullPath)) {
     result.backedUp = true; // Would back up in non-dry-run
@@ -573,20 +582,18 @@ export function removeBackup(
 ): { removed: boolean; error?: string } {
   const date = new Date(`${dateStr}T12:00:00`);
   const journalPath = getJournalPathForDate(config, date);
-  const journalFullPath = join(vaultPath, ensureMdExt(journalPath));
-  const backupPath = journalFullPath.replace(/\.md$/, ".bak.md");
+  const backupVaultPath = ensureMdExt(journalPath).replace(/\.md$/, ".bak.md");
+  const backupFullPath = join(vaultPath, backupVaultPath);
 
-  if (!existsSync(backupPath)) {
+  if (!existsSync(backupFullPath)) {
     return { removed: false, error: "No backup file found" };
   }
 
-  try {
-    unlinkSync(backupPath);
-    return { removed: true };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { removed: false, error: msg };
+  const result = runObsidian(["delete", `path=${backupVaultPath}`, "permanent"], config.vault);
+  if (result.exitCode !== 0) {
+    return { removed: false, error: result.stdout || result.stderr };
   }
+  return { removed: true };
 }
 
 async function main(): Promise<void> {
