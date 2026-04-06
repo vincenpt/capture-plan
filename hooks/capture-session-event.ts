@@ -5,7 +5,12 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import type { ContextHint } from "./capture-session-start.ts"
 import { contextHintPath } from "./capture-session-start.ts"
-import { createSessionDoc, upsertSessionDoc } from "./lib/session-doc.ts"
+import {
+  createSessionDoc,
+  FALLBACK_PROJECT_SLUG,
+  relocateSessionDoc,
+  upsertSessionDoc,
+} from "./lib/session-doc.ts"
 import { appendEvent, readAndClearEvents, truncatePrompt } from "./lib/session-events.ts"
 import { debugLog, detectCcVersion, getProjectName, loadConfig } from "./shared.ts"
 
@@ -61,7 +66,7 @@ async function main(): Promise<void> {
 
       if (enabled) {
         const now = new Date().toISOString()
-        const project = getProjectName(payload.cwd)
+        const project = getProjectName(payload.cwd ?? process.cwd())
         const sessionDocPath = createSessionDoc({
           sessionId,
           session: config.session,
@@ -74,7 +79,6 @@ async function main(): Promise<void> {
           hint.session_doc_path = sessionDocPath
           writeFileSync(contextHintPath(sessionId), JSON.stringify(hint))
         }
-        appendEvent(sessionId, { ts: now, type: "start" })
         debugLog(`SessionEvent: lazy-init created session doc for ${sessionId}\n`, DEBUG_LOG)
       }
     }
@@ -153,8 +157,28 @@ async function flushToVault(
   const events = readAndClearEvents(sessionId)
   if (events.length === 0 && !mode) return
 
-  const hint = readHint(sessionId)
+  let hint = readHint(sessionId)
   const config = await loadConfig(cwd)
+
+  // Relocate session doc from no-project to the correct project folder
+  const docPath = hint?.session_doc_path
+  if (docPath?.includes(`/${FALLBACK_PROJECT_SLUG}/`)) {
+    const project = getProjectName(cwd ?? process.cwd())
+    if (project) {
+      const newPath = relocateSessionDoc({
+        oldDocPath: docPath,
+        newProject: project,
+        session: config.session,
+        vault: config.vault,
+      })
+      if (newPath && hint) {
+        hint = { ...hint, session_doc_path: newPath }
+        writeFileSync(contextHintPath(sessionId), JSON.stringify(hint))
+        debugLog(`SessionEvent: relocated session doc to ${newPath}\n`, DEBUG_LOG)
+      }
+    }
+  }
+
   upsertSessionDoc({
     sessionId,
     session: config.session,

@@ -147,7 +147,7 @@ export function sessionDocPath(
   projectSlug: string,
 ): string {
   const firstSegment = sessionId.split("-")[0]
-  return `${sessionPath}/${projectSlug || "unknown"}/${firstSegment}`
+  return `${sessionPath}/${projectSlug || "no-project"}/${firstSegment}`
 }
 
 /** Build the session frontmatter YAML line, or empty string if sessions are disabled. */
@@ -158,7 +158,7 @@ export function formatSessionYaml(
   sessionDocPathOverride?: string,
 ): string {
   if (!sessionEnabled) return ""
-  const docPath = sessionDocPathOverride ?? sessionDocPath(sessionPath, sessionId, "unknown")
+  const docPath = sessionDocPathOverride ?? sessionDocPath(sessionPath, sessionId, "no-project")
   return `\nsession: "[[${docPath}|${shortSessionId(sessionId)}]]"`
 }
 

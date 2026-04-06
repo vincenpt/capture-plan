@@ -313,9 +313,9 @@ describe("sessionDocPath", () => {
     )
   })
 
-  it("falls back to unknown when project is empty", () => {
+  it("falls back to no-project when project is empty", () => {
     expect(sessionDocPath("Claude/Sessions", "3a76e3ac-3e0b-44c4-8962-b02716a8138b", "")).toBe(
-      "Claude/Sessions/unknown/3a76e3ac",
+      "Claude/Sessions/no-project/3a76e3ac",
     )
   })
 })
@@ -339,7 +339,7 @@ describe("formatSessionYaml", () => {
 
   it("falls back to computed path when no override", () => {
     const result = formatSessionYaml("abcdef1234", true, "My/Path")
-    expect(result).toBe('\nsession: "[[My/Path/unknown/abcdef1234|abcdef12]]"')
+    expect(result).toBe('\nsession: "[[My/Path/no-project/abcdef1234|abcdef12]]"')
   })
 })
 

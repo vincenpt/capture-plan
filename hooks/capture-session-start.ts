@@ -7,7 +7,7 @@ import { writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createSessionDoc } from "./lib/session-doc.ts"
-import { appendEvent } from "./lib/session-events.ts"
+
 import { PLUGIN_ROOT } from "./lib/types.ts"
 import { debugLog, detectCcVersion, getProjectName, loadConfig } from "./shared.ts"
 
@@ -140,8 +140,8 @@ async function main(): Promise<void> {
         debugLog(`Session doc created at ${sessionDocPath} for ${sessionId}\n`, DEBUG_LOG)
       }
 
-      // Buffer a start event (will be flushed on first significant event or Stop)
-      appendEvent(sessionId, { ts: now, type: "start" })
+      // Note: createSessionDoc already embeds the start event in the document body.
+      // No need to buffer a separate start event here.
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
