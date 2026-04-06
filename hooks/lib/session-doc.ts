@@ -1,8 +1,10 @@
 // session-doc.ts — Session document creation and upsert logic
 
-import { createVaultNote, readVaultNote } from "./obsidian.ts"
+import { join } from "node:path"
+import { nextCounter } from "./config.ts"
+import { createVaultNote, getVaultPath, readVaultNote } from "./obsidian.ts"
 import { formatEventLine, type SessionEvent } from "./session-events.ts"
-import { sessionDocPath } from "./text.ts"
+import { padCounter, sessionDocPath, toSlug } from "./text.ts"
 import type { SessionConfig } from "./types.ts"
 
 /** A wikilink entry parsed from or destined for session document frontmatter. */
@@ -28,6 +30,8 @@ export interface UpsertSessionDocOpts {
   session: SessionConfig
   vault?: string
   project?: string
+  /** Cached session doc path from the context hint file. Falls back to project-based lookup if absent. */
+  sessionDocPath?: string
   plans?: SessionLink[]
   summaries?: SessionLink[]
   toolsStats?: SessionLink[]
@@ -65,7 +69,7 @@ function mergeLinks(existing: SessionLink[], incoming: SessionLink[]): SessionLi
 /** Format a list of wikilinks as YAML frontmatter lines. */
 function formatLinksYaml(key: string, links: SessionLink[]): string {
   if (links.length === 0) return ""
-  const items = links.map((l) => `  - "[[${l.path}|${l.title.replace(/"/g, '\\"')}]]"`)
+  const items = links.map((l) => `  - "[[${l.path}|${l.title.replace(/"/g, "'")}]]"`)
   return `${key}:\n${items.join("\n")}`
 }
 
@@ -82,17 +86,26 @@ function parseEventLines(body: string): string[] {
   return eventsMatch[1].split("\n").filter((line) => line.startsWith("- "))
 }
 
-/** Create a new session document in the vault. Does not overwrite if one already exists. Caller must check session.enabled before calling. */
-export function createSessionDoc(opts: CreateSessionDocOpts): boolean {
-  const docPath = sessionDocPath(opts.session.path, opts.sessionId)
+/** Create a new session document in the vault. Returns the doc path on success, null on failure or if already exists. Caller must check session.enabled before calling. */
+export function createSessionDoc(opts: CreateSessionDocOpts): string | null {
+  const projectSlug = toSlug(opts.project || "unknown")
+  const firstSegment = opts.sessionId.split("-")[0]
+
+  // Compute counter by scanning the project directory in the vault
+  const vaultPath = getVaultPath(opts.vault)
+  const projectDirAbsolute = vaultPath ? join(vaultPath, opts.session.path, projectSlug) : null
+  const counter = projectDirAbsolute ? nextCounter(projectDirAbsolute) : 1
+
+  // Build path with counter prefix for browse-friendly ordering
+  const docPath = `${opts.session.path}/${projectSlug}/${padCounter(counter)}-${firstSegment}`
 
   // Don't overwrite an existing doc (e.g. on session restart)
   const existing = readVaultNote(docPath, opts.vault)
-  if (existing) return false
+  if (existing) return null
 
   const fmLines: string[] = []
   fmLines.push(`session_id: "${opts.sessionId}"`)
-  if (opts.project) fmLines.push(`project: ${opts.project}`)
+  if (opts.project) fmLines.push(`project: "${opts.project}"`)
   fmLines.push(`started: "${opts.started}"`)
   if (opts.model) fmLines.push(`model: "${opts.model}"`)
   if (opts.ccVersion) fmLines.push(`cc_version: "${opts.ccVersion}"`)
@@ -105,12 +118,15 @@ export function createSessionDoc(opts: CreateSessionDocOpts): boolean {
 
   const content = `---\n${fmLines.join("\n")}\n---\n# Session Log\n\n## Events\n\n${formatEventLine(startEvent)}\n`
 
-  return createVaultNote(docPath, content, opts.vault).success
+  const result = createVaultNote(docPath, content, opts.vault)
+  return result.success ? docPath : null
 }
 
 /** Create or update a session document in the vault, accumulating back-links to plans, summaries, and tool notes. Caller must check session.enabled before calling. */
 export function upsertSessionDoc(opts: UpsertSessionDocOpts): boolean {
-  const docPath = sessionDocPath(opts.session.path, opts.sessionId)
+  const projectSlug = toSlug(opts.project || "unknown")
+  const docPath =
+    opts.sessionDocPath ?? sessionDocPath(opts.session.path, opts.sessionId, projectSlug)
 
   // Read existing document to merge links and events
   let existingPlans: SessionLink[] = []
@@ -135,7 +151,7 @@ export function upsertSessionDoc(opts: UpsertSessionDocOpts): boolean {
       existingToolsStats = parseWikilinks(fm, "tools_stats")
       existingToolsLogs = parseWikilinks(fm, "tools_logs")
       existingActivities = parseWikilinks(fm, "activities")
-      const projMatch = fm.match(/^project:\s*(.+)/m)
+      const projMatch = fm.match(/^project:\s*"?([^"\n]+)"?/m)
       if (projMatch) existingProject = projMatch[1].trim()
       const startedMatch = fm.match(/^started:\s*"?([^"\n]+)"?/m)
       if (startedMatch) existingStarted = startedMatch[1].trim()
@@ -164,7 +180,7 @@ export function upsertSessionDoc(opts: UpsertSessionDocOpts): boolean {
   // Build frontmatter
   const fmLines: string[] = []
   fmLines.push(`session_id: "${opts.sessionId}"`)
-  if (project) fmLines.push(`project: ${project}`)
+  if (project) fmLines.push(`project: "${project}"`)
   if (existingStarted) fmLines.push(`started: "${existingStarted}"`)
   if (existingModel) fmLines.push(`model: "${existingModel}"`)
   if (existingCcVersion) fmLines.push(`cc_version: "${existingCcVersion}"`)

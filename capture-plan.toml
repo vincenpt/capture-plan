@@ -29,7 +29,7 @@ capture_skills = ["simplify"]
 
 # Session document capture (toggle via /session skill)
 # Creates session documents that cross-link to plans/summaries/tools.
-# Path segments use ID-based bucketing: <path>/<first-2-chars>/<remaining-id>.md
+# Path segments use project-based grouping: <path>/<project>/<counter>-<id-prefix>.md
 # [session]
 # enabled = false
 # path = "Claude/Sessions"

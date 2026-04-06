@@ -29,6 +29,7 @@ import {
   padCounter,
   readAndClearEvents,
   readCcVersion,
+  readSessionDocPath,
   resolveContextCap,
   type SessionState,
   stripTitleLine,
@@ -184,7 +185,13 @@ async function main(): Promise<void> {
     const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
     const sessionEnabled = config.session.enabled ?? false
-    const sessionYaml = formatSessionYaml(sessionId, sessionEnabled, config.session.path)
+    const cachedSessionDocPath = readSessionDocPath(sessionId)
+    const sessionYaml = formatSessionYaml(
+      sessionId,
+      sessionEnabled,
+      config.session.path,
+      cachedSessionDocPath,
+    )
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}${sessionYaml}${ccVersionYaml}${modelYaml}
@@ -213,6 +220,7 @@ ${stripTitleLine(planContent)}
       session: config.session,
       vault: config.vault,
       project,
+      sessionDocPath: cachedSessionDocPath,
       plans: [{ path: planPath, title }],
       mode: "normal",
       events: bufferedEvents,

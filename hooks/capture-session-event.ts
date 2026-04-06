@@ -62,7 +62,7 @@ async function main(): Promise<void> {
       if (enabled) {
         const now = new Date().toISOString()
         const project = getProjectName(payload.cwd)
-        createSessionDoc({
+        const sessionDocPath = createSessionDoc({
           sessionId,
           session: config.session,
           vault: config.vault,
@@ -70,6 +70,10 @@ async function main(): Promise<void> {
           started: now,
           ccVersion,
         })
+        if (sessionDocPath) {
+          hint.session_doc_path = sessionDocPath
+          writeFileSync(contextHintPath(sessionId), JSON.stringify(hint))
+        }
         appendEvent(sessionId, { ts: now, type: "start" })
         debugLog(`SessionEvent: lazy-init created session doc for ${sessionId}\n`, DEBUG_LOG)
       }
@@ -149,11 +153,13 @@ async function flushToVault(
   const events = readAndClearEvents(sessionId)
   if (events.length === 0 && !mode) return
 
+  const hint = readHint(sessionId)
   const config = await loadConfig(cwd)
   upsertSessionDoc({
     sessionId,
     session: config.session,
     vault: config.vault,
+    sessionDocPath: hint?.session_doc_path,
     ...(mode ? { mode } : {}),
     events,
   })

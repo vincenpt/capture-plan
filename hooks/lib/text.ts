@@ -140,11 +140,14 @@ export function shortSessionId(id: string): string {
   return id.slice(0, 8)
 }
 
-/** Build the vault path for a session document (id-segmented by first 2 chars, no .md extension). */
-export function sessionDocPath(sessionPath: string, sessionId: string): string {
-  const prefix = sessionId.slice(0, 2)
-  const rest = sessionId.slice(2)
-  return `${sessionPath}/${prefix}/${rest}`
+/** Build the vault path for a session document (project-based, no .md extension, no counter prefix). */
+export function sessionDocPath(
+  sessionPath: string,
+  sessionId: string,
+  projectSlug: string,
+): string {
+  const firstSegment = sessionId.split("-")[0]
+  return `${sessionPath}/${projectSlug || "unknown"}/${firstSegment}`
 }
 
 /** Build the session frontmatter YAML line, or empty string if sessions are disabled. */
@@ -152,9 +155,10 @@ export function formatSessionYaml(
   sessionId: string,
   sessionEnabled: boolean,
   sessionPath: string,
+  sessionDocPathOverride?: string,
 ): string {
   if (!sessionEnabled) return ""
-  const docPath = sessionDocPath(sessionPath, sessionId)
+  const docPath = sessionDocPathOverride ?? sessionDocPath(sessionPath, sessionId, "unknown")
   return `\nsession: "[[${docPath}|${shortSessionId(sessionId)}]]"`
 }
 

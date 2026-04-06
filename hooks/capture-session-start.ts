@@ -32,6 +32,8 @@ export interface ContextHint {
   source: string
   session_enabled: boolean
   transcript_path?: string
+  /** Cached vault path for the session document (set after creation). */
+  session_doc_path?: string
 }
 
 /** Parse context window size from a model identifier like "claude-opus-4-6[1m]". */
@@ -122,7 +124,7 @@ async function main(): Promise<void> {
       const now = new Date().toISOString()
       const project = getProjectName(cwd)
 
-      const created = createSessionDoc({
+      const sessionDocPath = createSessionDoc({
         sessionId,
         session: config.session,
         vault: config.vault,
@@ -132,8 +134,10 @@ async function main(): Promise<void> {
         ccVersion: ccVersion,
       })
 
-      if (created) {
-        debugLog(`Session doc created for ${sessionId}\n`, DEBUG_LOG)
+      if (sessionDocPath) {
+        hint.session_doc_path = sessionDocPath
+        writeFileSync(hintFile, JSON.stringify(hint))
+        debugLog(`Session doc created at ${sessionDocPath} for ${sessionId}\n`, DEBUG_LOG)
       }
 
       // Buffer a start event (will be flushed on first significant event or Stop)

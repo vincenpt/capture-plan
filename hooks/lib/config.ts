@@ -247,6 +247,18 @@ export function readCcVersion(sessionId: string): string | undefined {
   return readContextHint(sessionId).cc_version
 }
 
+/** Read the cached session document vault path from the context hint file. */
+export function readSessionDocPath(sessionId: string): string | undefined {
+  try {
+    const hintFile = join(tmpdir(), `capture-plan-context-${sessionId}.json`)
+    const raw = readFileSync(hintFile, "utf8")
+    const hint = JSON.parse(raw) as { session_doc_path?: string }
+    return typeof hint.session_doc_path === "string" ? hint.session_doc_path : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** Parse Claude Code version from `claude --version` output (e.g. "2.1.89 (Claude Code)"). */
 export function parseCcVersion(raw: string): string | undefined {
   const match = raw.trim().match(/^(\d+\.\d+\.\d+)/)

@@ -301,14 +301,22 @@ describe("shortSessionId", () => {
 })
 
 describe("sessionDocPath", () => {
-  it("segments by first 2 chars of session ID", () => {
-    expect(sessionDocPath("Claude/Sessions", "3a76e3ac-3e0b-44c4-8962-b02716a8138b")).toBe(
-      "Claude/Sessions/3a/76e3ac-3e0b-44c4-8962-b02716a8138b",
-    )
+  it("builds project-based path with first UUID segment", () => {
+    expect(
+      sessionDocPath("Claude/Sessions", "3a76e3ac-3e0b-44c4-8962-b02716a8138b", "capture-plan"),
+    ).toBe("Claude/Sessions/capture-plan/3a76e3ac")
   })
 
   it("works with custom path", () => {
-    expect(sessionDocPath("My/Sessions", "abcdef1234")).toBe("My/Sessions/ab/cdef1234")
+    expect(sessionDocPath("My/Sessions", "abcdef1234", "my-project")).toBe(
+      "My/Sessions/my-project/abcdef1234",
+    )
+  })
+
+  it("falls back to unknown when project is empty", () => {
+    expect(sessionDocPath("Claude/Sessions", "3a76e3ac-3e0b-44c4-8962-b02716a8138b", "")).toBe(
+      "Claude/Sessions/unknown/3a76e3ac",
+    )
   })
 })
 
@@ -319,20 +327,19 @@ describe("formatSessionYaml", () => {
     ).toBe("")
   })
 
-  it("returns session YAML line when enabled", () => {
+  it("returns session YAML line with override path", () => {
     const result = formatSessionYaml(
       "3a76e3ac-3e0b-44c4-8962-b02716a8138b",
       true,
       "Claude/Sessions",
+      "Claude/Sessions/capture-plan/001-3a76e3ac",
     )
-    expect(result).toBe(
-      '\nsession: "[[Claude/Sessions/3a/76e3ac-3e0b-44c4-8962-b02716a8138b|3a76e3ac]]"',
-    )
+    expect(result).toBe('\nsession: "[[Claude/Sessions/capture-plan/001-3a76e3ac|3a76e3ac]]"')
   })
 
-  it("uses custom path", () => {
+  it("falls back to computed path when no override", () => {
     const result = formatSessionYaml("abcdef1234", true, "My/Path")
-    expect(result).toBe('\nsession: "[[My/Path/ab/cdef1234|abcdef12]]"')
+    expect(result).toBe('\nsession: "[[My/Path/unknown/abcdef1234|abcdef12]]"')
   })
 })
 

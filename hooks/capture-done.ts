@@ -37,6 +37,7 @@ import {
   padCounter,
   readAndClearEvents,
   readCcVersion,
+  readSessionDocPath,
   resolveContextCap,
   type SessionState,
   scanForVaultState,
@@ -132,10 +133,12 @@ async function buildSuperpowersState(
   const ccVersion = detectCcVersion() ?? readCcVersion(sessionId)
   const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
+  const spCachedSessionDocPath = readSessionDocPath(sessionId)
   const spSessionYaml = formatSessionYaml(
     sessionId,
     config.session.enabled ?? false,
     config.session.path,
+    spCachedSessionDocPath,
   )
 
   const noteContent = `---
@@ -316,10 +319,12 @@ async function buildSkillState(
     .filter(Boolean)
     .join("\n\n---\n\n")
 
+  const skillCachedDocPath = readSessionDocPath(sessionId)
   const skillSessionYaml = formatSessionYaml(
     sessionId,
     config.session.enabled ?? false,
     config.session.path,
+    skillCachedDocPath,
   )
 
   const noteContent = `---
@@ -418,12 +423,20 @@ async function main(): Promise<void> {
     // Buffer a stop event and collect all pending events for flush
     appendEvent(sessionId, { ts: new Date().toISOString(), type: "stop" })
 
+    const cachedSessionDocPath = readSessionDocPath(sessionId)
+
     /** Flush buffered session events to the vault doc. Called on all exit paths. */
     const flushEvents = (): void => {
       if (!config.session.enabled ?? false) return
       const events = readAndClearEvents(sessionId)
       if (events.length === 0) return
-      upsertSessionDoc({ sessionId, session: config.session, vault: config.vault, events })
+      upsertSessionDoc({
+        sessionId,
+        session: config.session,
+        vault: config.vault,
+        sessionDocPath: cachedSessionDocPath,
+        events,
+      })
     }
 
     // Find transcript early — needed for both plan-mode and superpowers paths
@@ -844,6 +857,7 @@ ${contextText || "_No context captured_"}
       session: config.session,
       vault: config.vault,
       project,
+      sessionDocPath: cachedSessionDocPath,
       summaries: [{ path: summaryPath, title: `Done: ${state.plan_title}` }],
       ...(toolsNoteContent
         ? {
