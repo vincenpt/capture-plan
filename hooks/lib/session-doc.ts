@@ -129,21 +129,21 @@ function parseBody(content: string): string {
   return match ? match[1] : ""
 }
 
-/** Extract existing event entries from the `## Events` section of the body. Each entry may span multiple lines (e.g. prompt blockquotes). A new entry starts with `- `; continuation lines (indented blockquotes, etc.) are grouped with the preceding entry. */
+/** Extract existing event entries from the `## Events` section of the body. Each entry may span multiple lines (e.g. prompt code fences, stop message markdown). A new entry starts with `### ` (or legacy `- ` for backwards compatibility); all lines between entries are grouped with the preceding entry. */
 function parseEventLines(body: string): string[] {
   const eventsMatch = body.match(/## Events\n\n([\s\S]*)$/)
   if (!eventsMatch) return []
 
   const entries: string[] = []
   for (const line of eventsMatch[1].split("\n")) {
-    if (line.startsWith("- ")) {
+    if (line.startsWith("### ") || line.startsWith("- ")) {
       entries.push(line)
-    } else if (line.trim() && entries.length > 0) {
-      // Continuation line — append to current entry
+    } else if (entries.length > 0) {
+      // Continuation line (including blank lines) — append to current entry
       entries[entries.length - 1] += `\n${line}`
     }
   }
-  return entries
+  return entries.map((e) => e.trimEnd())
 }
 
 /** Create a new session document in the vault. Returns the doc path on success, null on failure or if already exists. Caller must check session.enabled before calling. */
@@ -220,7 +220,7 @@ export function upsertSessionDoc(opts: UpsertSessionDocOpts): boolean {
   const newEventLines = (opts.events ?? []).map(formatEventLine)
   const allEventLines = [...(ex?.eventLines ?? []), ...newEventLines]
 
-  const eventsSection = allEventLines.length > 0 ? `${allEventLines.join("\n")}\n` : ""
+  const eventsSection = allEventLines.length > 0 ? `${allEventLines.join("\n\n")}\n` : ""
   const content = `---\n${fmLines.join("\n")}\n---\n# Session Log\n\n## Events\n\n${eventsSection}`
 
   return createVaultNote(docPath, content, opts.vault).success
@@ -334,7 +334,7 @@ export function relocateSessionDoc(opts: RelocateSessionDocOpts): string | null 
     fmLines.push(linkSections.join("\n"))
   }
 
-  const eventsSection = eventLines.length > 0 ? `${eventLines.join("\n")}\n` : ""
+  const eventsSection = eventLines.length > 0 ? `${eventLines.join("\n\n")}\n` : ""
   const content = `---\n${fmLines.join("\n")}\n---\n# Session Log\n\n## Events\n\n${eventsSection}`
 
   const result = createVaultNote(newDocPath, content, opts.vault)

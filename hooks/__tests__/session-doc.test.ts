@@ -357,7 +357,7 @@ describe("relocateSessionDoc", () => {
       "",
       "## Events",
       "",
-      "- 10:11 PM `stop` — Turn completed",
+      "### 10:11 PM `stop` — Turn completed",
       "",
     ].join("\n")
 

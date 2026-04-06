@@ -74,7 +74,7 @@ export function readAndClearEvents(sessionId: string): SessionEvent[] {
   return events
 }
 
-/** Format a session event as a markdown bullet line (or multi-line block) for the session document. Prompt events render as indented blockquotes; all other events remain single-line. */
+/** Format a session event as a markdown heading block for the session document. Prompt events render as code fences; stop event messages render as raw markdown. */
 export function formatEventLine(event: SessionEvent): string {
   const date = new Date(event.ts)
   const time = date.toLocaleTimeString("en-US", {
@@ -85,30 +85,22 @@ export function formatEventLine(event: SessionEvent): string {
   const label = eventLabel(event)
 
   if (event.type === "prompt" && event.text) {
-    const blockquote = event.text
-      .split("\n")
-      .map((line) => `  > ${line}`)
-      .join("\n")
-    return `- **${time}** \`${event.type}\` — ${label}:\n${blockquote}`
+    return `### ${time} \`${event.type}\` — ${label}\n\n\`\`\`\n${event.text}\n\`\`\``
   }
 
-  // Stop events: stats in parens, message as blockquote
+  // Stop events: stats in parens, message as raw markdown
   if (event.type === "stop" && (event.text || event.message)) {
     const stats = event.text ? ` (${event.text})` : ""
     if (event.message) {
-      const blockquote = event.message
-        .split("\n")
-        .map((line) => `  > ${line}`)
-        .join("\n")
-      return `- **${time}** \`stop\` — ${label}${stats}:\n${blockquote}`
+      return `### ${time} \`stop\` — ${label}${stats}\n\n${event.message}`
     }
-    return `- **${time}** \`stop\` — ${label}${stats}`
+    return `### ${time} \`stop\` — ${label}${stats}`
   }
 
   if (event.text) {
-    return `- **${time}** \`${event.type}\` — ${label}: ${event.text}`
+    return `### ${time} \`${event.type}\` — ${label}: ${event.text}`
   }
-  return `- **${time}** \`${event.type}\` — ${label}`
+  return `### ${time} \`${event.type}\` — ${label}`
 }
 
 /** Human-readable label for each event type. */

@@ -103,28 +103,27 @@ describe("formatEventLine", () => {
     const line = formatEventLine({ ts: "2026-04-05T14:32:00Z", type: "start" })
     expect(line).toContain("`start`")
     expect(line).toContain("Session started")
-    expect(line).toMatch(/^- \*\*/)
+    expect(line).toMatch(/^### /)
   })
 
-  it("formats a prompt event as an indented blockquote", () => {
+  it("formats a prompt event as a code fence", () => {
     const line = formatEventLine({
       ts: "2026-04-05T14:33:00Z",
       type: "prompt",
       text: "Fix the bug",
     })
     expect(line).toContain("`prompt`")
-    expect(line).toContain("Prompt:")
-    expect(line).toContain("  > Fix the bug")
-    expect(line).toMatch(/^- \*\*.*\*\* `prompt` — Prompt:\n {2}> Fix the bug$/)
+    expect(line).toContain("— Prompt")
+    expect(line).toMatch(/^### .*`prompt` — Prompt\n\n```\nFix the bug\n```$/)
   })
 
-  it("formats a multi-line prompt as multiple indented blockquote lines", () => {
+  it("formats a multi-line prompt as a single code fence", () => {
     const line = formatEventLine({
       ts: "2026-04-05T14:33:00Z",
       type: "prompt",
       text: "First line\nSecond line\nThird line",
     })
-    expect(line).toContain("  > First line\n  > Second line\n  > Third line")
+    expect(line).toContain("```\nFirst line\nSecond line\nThird line\n```")
   })
 
   it("formats mode change events", () => {
@@ -170,14 +169,13 @@ describe("formatEventLine", () => {
     expect(line).toContain("Turn completed (2m 15s · 8 turns · 23 tools)")
   })
 
-  it("formats a stop event with message as blockquote", () => {
+  it("formats a stop event with message as raw markdown", () => {
     const line = formatEventLine({
       ts: "2026-04-05T14:45:00Z",
       type: "stop",
       message: "Committed and pushed as 33a883d.",
     })
-    expect(line).toContain("Turn completed:")
-    expect(line).toContain("  > Committed and pushed as 33a883d.")
+    expect(line).toMatch(/Turn completed\n\nCommitted and pushed as 33a883d\.$/)
   })
 
   it("formats a stop event with stats and message", () => {
@@ -187,7 +185,7 @@ describe("formatEventLine", () => {
       text: "15s · 4 tools",
       message: "Committed and pushed.",
     })
-    expect(line).toMatch(/Turn completed \(15s · 4 tools\):\n {2}> Committed and pushed\./)
+    expect(line).toMatch(/Turn completed \(15s · 4 tools\)\n\nCommitted and pushed\./)
   })
 })
 
