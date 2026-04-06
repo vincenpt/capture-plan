@@ -71,7 +71,7 @@ export function readAndClearEvents(sessionId: string): SessionEvent[] {
   return events
 }
 
-/** Format a session event as a markdown bullet line for the session document. */
+/** Format a session event as a markdown bullet line (or multi-line block) for the session document. Prompt events render as indented blockquotes; all other events remain single-line. */
 export function formatEventLine(event: SessionEvent): string {
   const date = new Date(event.ts)
   const time = date.toLocaleTimeString("en-US", {
@@ -80,6 +80,15 @@ export function formatEventLine(event: SessionEvent): string {
     hour12: true,
   })
   const label = eventLabel(event)
+
+  if (event.type === "prompt" && event.text) {
+    const blockquote = event.text
+      .split("\n")
+      .map((line) => `  > ${line}`)
+      .join("\n")
+    return `- **${time}** \`${event.type}\` — ${label}:\n${blockquote}`
+  }
+
   if (event.text) {
     return `- **${time}** \`${event.type}\` — ${label}: ${event.text}`
   }

@@ -10,7 +10,7 @@ date_scheme = "calendar"   # calendar | compact | monthly | flat
 
 # Journal entries configuration
 [journal]
-path = "Journal"
+path = "Claude/Journal"
 date_scheme = "calendar"   # calendar | compact | monthly | flat
 
 # Context window cap in tokens (auto-detected, override if needed)

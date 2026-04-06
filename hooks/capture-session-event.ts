@@ -15,22 +15,21 @@ import {
   loadConfig,
   readAndClearEvents,
   readContextHintFull,
-  truncatePrompt,
   upsertSessionDoc,
 } from "./shared.ts"
 
 const DEBUG_LOG = "/tmp/capture-plan-debug.log"
 
-/** Default prompt max chars if not configured. */
-const DEFAULT_PROMPT_MAX_CHARS = 1000
+/** Hard ceiling on prompt text to prevent pathological payloads. */
+const PROMPT_HARD_CEILING = 10_000
 
 interface EventPayload {
   session_id: string
   hook_event_name?: string
   tool_name?: string
   cwd?: string
-  /** UserPromptSubmit provides the user's prompt text. */
-  user_message?: string
+  /** UserPromptSubmit provides the user's prompt text via the `prompt` field. */
+  prompt?: string
   /** SubagentStart may include a description. */
   description?: string
   [key: string]: unknown
@@ -89,13 +88,16 @@ async function main(): Promise<void> {
 
     // Dispatch by event type
     if (eventName === "UserPromptSubmit") {
-      const promptText = payload.user_message ?? ""
-      if (!promptText) return
+      const rawPrompt = payload.prompt ?? ""
+      if (!rawPrompt) return
 
-      const maxChars = config.session.prompt_max_chars ?? DEFAULT_PROMPT_MAX_CHARS
-      const truncated = truncatePrompt(promptText, maxChars)
+      const promptText =
+        rawPrompt.length > PROMPT_HARD_CEILING
+          ? `${rawPrompt.slice(0, PROMPT_HARD_CEILING)}...`
+          : rawPrompt
 
-      appendEvent(sessionId, { ts: now, type: "prompt", text: truncated })
+      appendEvent(sessionId, { ts: now, type: "prompt", text: promptText })
+      flushToVault(sessionId, config, payload.cwd)
       return
     }
 

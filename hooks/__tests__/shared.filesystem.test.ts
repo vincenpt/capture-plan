@@ -18,8 +18,11 @@ describe("hooks.json", () => {
   it("contains valid JSON with expected hook events", () => {
     const content = JSON.parse(readFileSync(hooksJsonPath, "utf8"))
     expect(content.hooks).toBeDefined()
-    expect(content.hooks.PostToolUse).toBeArrayOfSize(1)
+    expect(content.hooks.SessionStart).toBeArrayOfSize(1)
+    expect(content.hooks.UserPromptSubmit).toBeArrayOfSize(1)
+    expect(content.hooks.PostToolUse).toBeArrayOfSize(2)
     expect(content.hooks.PostToolUse[0].matcher).toBe("ExitPlanMode")
+    expect(content.hooks.PostToolUse[1].matcher).toBe("EnterPlanMode")
     expect(content.hooks.Stop).toBeArrayOfSize(1)
   })
 

@@ -61,7 +61,7 @@ const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.toml")
 const USER_GLOBAL_CONFIG = join(homedir(), ".config", "capture-plan", "config.toml")
 
 const DEFAULT_PLAN_PATH = "Claude/Plans"
-const DEFAULT_JOURNAL_PATH = "Journal"
+const DEFAULT_JOURNAL_PATH = "Claude/Journal"
 const DEFAULT_SESSION_PATH = "Claude/Sessions"
 const DEFAULT_DATE_SCHEME: DateScheme = "calendar"
 

@@ -129,11 +129,21 @@ function parseBody(content: string): string {
   return match ? match[1] : ""
 }
 
-/** Extract existing event lines from the `## Events` section of the body. */
+/** Extract existing event entries from the `## Events` section of the body. Each entry may span multiple lines (e.g. prompt blockquotes). A new entry starts with `- `; continuation lines (indented blockquotes, etc.) are grouped with the preceding entry. */
 function parseEventLines(body: string): string[] {
   const eventsMatch = body.match(/## Events\n\n([\s\S]*)$/)
   if (!eventsMatch) return []
-  return eventsMatch[1].split("\n").filter((line) => line.startsWith("- "))
+
+  const entries: string[] = []
+  for (const line of eventsMatch[1].split("\n")) {
+    if (line.startsWith("- ")) {
+      entries.push(line)
+    } else if (line.trim() && entries.length > 0) {
+      // Continuation line — append to current entry
+      entries[entries.length - 1] += `\n${line}`
+    }
+  }
+  return entries
 }
 
 /** Create a new session document in the vault. Returns the doc path on success, null on failure or if already exists. Caller must check session.enabled before calling. */

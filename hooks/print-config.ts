@@ -49,7 +49,7 @@ const KEYS: KeyDef[] = [
     table: "journal",
     field: "path",
     flatKey: "journal_path",
-    defaultValue: "Journal",
+    defaultValue: "Claude/Journal",
   },
   { key: "journal.date_scheme", table: "journal", field: "date_scheme", defaultValue: "calendar" },
   { key: "session.path", table: "session", field: "path", defaultValue: "Claude/Sessions" },

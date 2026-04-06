@@ -105,15 +105,25 @@ describe("formatEventLine", () => {
     expect(line).toMatch(/^- \*\*/)
   })
 
-  it("formats a prompt event with text", () => {
+  it("formats a prompt event as an indented blockquote", () => {
     const line = formatEventLine({
       ts: "2026-04-05T14:33:00Z",
       type: "prompt",
       text: "Fix the bug",
     })
     expect(line).toContain("`prompt`")
-    expect(line).toContain("Prompt")
-    expect(line).toContain("Fix the bug")
+    expect(line).toContain("Prompt:")
+    expect(line).toContain("  > Fix the bug")
+    expect(line).toMatch(/^- \*\*.*\*\* `prompt` — Prompt:\n {2}> Fix the bug$/)
+  })
+
+  it("formats a multi-line prompt as multiple indented blockquote lines", () => {
+    const line = formatEventLine({
+      ts: "2026-04-05T14:33:00Z",
+      type: "prompt",
+      text: "First line\nSecond line\nThird line",
+    })
+    expect(line).toContain("  > First line\n  > Second line\n  > Third line")
   })
 
   it("formats mode change events", () => {
