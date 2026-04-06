@@ -98,19 +98,11 @@ export function writeVaultState(state: SessionState, vault?: string): boolean {
   return createVaultNote(`${state.plan_dir}/state`, lines.join("\n"), vault).success
 }
 
-/** Scan today's and yesterday's plan directories for a matching session state file, cleaning up stale entries. */
+/** Scan today's and yesterday's plan directories for a matching session state file. */
 export function scanForVaultState(sessionId: string, config: Config): SessionState | null {
   let match: SessionState | null = null
 
-  // State files expire in 2h, so only scan today + yesterday (covers midnight crossover)
-  const today = new Date()
-  const yesterday = new Date(today.getTime() - 86_400_000)
-  const recentDatePaths = [today, yesterday].map((d) => {
-    const parts = getDatePartsFor(d)
-    return formatDatePath(config.plan.date_scheme, parts)
-  })
-
-  for (const dateSeg of recentDatePaths) {
+  for (const dateSeg of recentDateSegments(config)) {
     const dateFolder = `${config.plan.path}/${dateSeg}`
     const planDirs = listVaultFolders(dateFolder, config.vault)
 
@@ -120,17 +112,11 @@ export function scanForVaultState(sessionId: string, config: Config): SessionSta
       if (!text) continue
 
       const state = parseStateFromFrontmatter(text)
-      if (!state) continue
+      if (!state || state.completed) continue
 
-      // Completed states are permanent session records — skip entirely
-      if (state.completed) continue
-
-      // Housekeeping: remove stale state files
+      // Skip stale states (>2h) but don't delete here — cleanup runs separately
       const age = Date.now() - new Date(state.timestamp).getTime()
-      if (age > STALE_STATE_MS) {
-        runObsidian(["delete", `path=${dateFolder}/${dirName}/state.md`, "permanent"], config.vault)
-        continue
-      }
+      if (age > STALE_STATE_MS) continue
 
       if (state.session_id === sessionId) {
         match = state
@@ -139,6 +125,38 @@ export function scanForVaultState(sessionId: string, config: Config): SessionSta
   }
 
   return match
+}
+
+/** Delete stale (>2h) uncompleted state files from today's and yesterday's plan directories. */
+export function cleanupStaleStates(config: Config): void {
+  for (const dateSeg of recentDateSegments(config)) {
+    const dateFolder = `${config.plan.path}/${dateSeg}`
+    const planDirs = listVaultFolders(dateFolder, config.vault)
+
+    for (const dirName of planDirs) {
+      const stateRel = `${dateFolder}/${dirName}/state`
+      const text = readVaultNote(stateRel, config.vault)
+      if (!text) continue
+
+      const state = parseStateFromFrontmatter(text)
+      if (!state || state.completed) continue
+
+      const age = Date.now() - new Date(state.timestamp).getTime()
+      if (age > STALE_STATE_MS) {
+        runObsidian(["delete", `path=${dateFolder}/${dirName}/state.md`, "permanent"], config.vault)
+      }
+    }
+  }
+}
+
+/** Return date path segments for today and yesterday (covers midnight crossover). */
+function recentDateSegments(config: Config): string[] {
+  const today = new Date()
+  const yesterday = new Date(today.getTime() - 86_400_000)
+  return [today, yesterday].map((d) => {
+    const parts = getDatePartsFor(d)
+    return formatDatePath(config.plan.date_scheme, parts)
+  })
 }
 
 /** Remove the state.md file from a plan directory after the Stop hook has consumed it. */

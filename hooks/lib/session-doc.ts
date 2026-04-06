@@ -1,8 +1,8 @@
 // session-doc.ts — Session document creation and upsert logic
 
-import { readdirSync, writeFileSync } from "node:fs"
+import { readdirSync } from "node:fs"
 import { join } from "node:path"
-import { contextHintPath, readContextHintFull } from "./config.ts"
+import { updateContextHint } from "./config.ts"
 import {
   createVaultNote,
   getVaultPath,
@@ -449,13 +449,7 @@ export function ensureSessionRelocated(opts: EnsureSessionRelocatedOpts): string
 
 /** Update the session_doc_path in the hint file. */
 function updateHintPath(sessionId: string, docPath: string): void {
-  const hint = readContextHintFull(sessionId)
-  if (hint) {
-    writeFileSync(
-      contextHintPath(sessionId),
-      JSON.stringify({ ...hint, session_doc_path: docPath }),
-    )
-  }
+  updateContextHint(sessionId, { session_doc_path: docPath })
 }
 
 /** Find an existing session doc by scanning a project directory. Returns the vault-relative path if found, null otherwise. */

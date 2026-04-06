@@ -1,6 +1,6 @@
 // config.ts — Config loading, context hints, version detection, transcript discovery
 
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DATE_SCHEMES, type DateScheme } from "./dates.ts"
@@ -267,6 +267,16 @@ export function readCcVersion(sessionId: string): string | undefined {
 export function readSessionDocPath(sessionId: string): string | undefined {
   const hint = readContextHintFull(sessionId)
   return typeof hint?.session_doc_path === "string" ? hint.session_doc_path : undefined
+}
+
+/** Merge partial updates into the context hint file. Only overwrites supplied keys; other fields are preserved. */
+export function updateContextHint(
+  sessionId: string,
+  patch: Partial<Pick<ContextHint, "plan_dir" | "session_doc_path">>,
+): void {
+  const hint = readContextHintFull(sessionId)
+  if (!hint) return
+  writeFileSync(contextHintPath(sessionId), JSON.stringify({ ...hint, ...patch }))
 }
 
 /** Parse Claude Code version from `claude --version` output (e.g. "2.1.89 (Claude Code)"). */

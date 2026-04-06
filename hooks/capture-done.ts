@@ -37,14 +37,17 @@ import {
   mergeTags,
   nextCounter,
   padCounter,
+  parseStateFromFrontmatter,
   readAndClearEvents,
   readContextHintFull,
+  readVaultNote,
   resolveContextCap,
   type SessionState,
   scanForVaultState,
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
+  updateContextHint,
   updateJournalFrontmatter,
   upsertSessionDoc,
   writeVaultState,
@@ -454,6 +457,12 @@ async function main(): Promise<void> {
       })
     }
 
+    /** Delete the vault state file and clear the plan_dir hint so subsequent stops skip the vault scan. */
+    const consumeVaultState = (planDir: string): void => {
+      deleteVaultState(planDir, config.vault)
+      updateContextHint(sessionId, { plan_dir: undefined })
+    }
+
     // Find transcript early — needed for both plan-mode and superpowers paths
     let transcriptPath = payload.transcript_path || null
     if (!transcriptPath) {
@@ -463,8 +472,21 @@ async function main(): Promise<void> {
     // Resolve vault filesystem path (used for state cleanup and journal appends)
     const vaultPath = getVaultPath(config.vault)
 
-    // Gate: scan vault for pending session state (also cleans up stale states)
-    let state = scanForVaultState(sessionId, config)
+    // Gate: look up pending session state via hint (fast path) or vault scan (fallback)
+    let state: SessionState | null = null
+    if (mainHint?.plan_dir) {
+      // Fast path: hint records the plan_dir written by capture-plan — single CLI read
+      const stateText = readVaultNote(`${mainHint.plan_dir}/state`, config.vault)
+      if (stateText) {
+        const parsed = parseStateFromFrontmatter(stateText)
+        if (parsed && !parsed.completed && parsed.session_id === sessionId) {
+          state = parsed
+        }
+      }
+    } else {
+      // Fallback: full vault scan (handles sessions started before hint-based tracking)
+      state = scanForVaultState(sessionId, config)
+    }
     let boundaryIdx = -1
     let entries: TranscriptEntry[] = []
     let isSuperpowers = false
@@ -499,7 +521,7 @@ async function main(): Promise<void> {
 
       if (boundaryIdx === -1) {
         debugLog("No plan boundary found in transcript\n", DEBUG_LOG)
-        deleteVaultState(state.plan_dir, config.vault)
+        consumeVaultState(state.plan_dir)
         flushEvents({ message: lastMessage })
         process.exit(0)
       }
@@ -628,7 +650,7 @@ async function main(): Promise<void> {
       }
       // Superpowers: still capture the plan note even without execution
       // (state was already created with vault note in buildSuperpowersState)
-      deleteVaultState(state.plan_dir, config.vault)
+      consumeVaultState(state.plan_dir)
       flushEvents({ message: lastMessage })
       process.exit(0)
     }
@@ -753,7 +775,7 @@ ${fileList}
         `Failed to create summary note: stdout=${createResult.stdout} stderr=${createResult.stderr}\n`,
         DEBUG_LOG,
       )
-      deleteVaultState(state.plan_dir, config.vault)
+      consumeVaultState(state.plan_dir)
       flushEvents({ message: lastMessage })
       process.exit(0)
     }
@@ -949,7 +971,7 @@ ${contextText || "_No context captured_"}
     })
 
     // Clean up session state from vault
-    deleteVaultState(state.plan_dir, config.vault)
+    consumeVaultState(state.plan_dir)
 
     console.error(`Done summary captured -> ${summaryPath}.md`)
     debugLog(`Summary captured for ${state.plan_title}\n`, DEBUG_LOG)

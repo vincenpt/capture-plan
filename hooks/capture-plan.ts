@@ -7,6 +7,7 @@ import { PLAN_SYSTEM_PROMPT } from "./lib/prompts.ts"
 import {
   appendEvent,
   appendOrCreateCallout,
+  cleanupStaleStates,
   createVaultNote,
   debugLog,
   detectCcVersion,
@@ -35,6 +36,7 @@ import {
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
+  updateContextHint,
   updateJournalFrontmatter,
   upsertSessionDoc,
   writeVaultState,
@@ -275,7 +277,12 @@ ${stripTitleLine(planContent)}
     const stateWritten = writeVaultState(state, config.vault)
     if (!stateWritten) {
       debugLog("Failed to write vault state\n", DEBUG_LOG)
+    } else {
+      updateContextHint(sessionId, { plan_dir: planDir })
     }
+
+    // Opportunistic cleanup of stale state files from previous sessions
+    cleanupStaleStates(config)
 
     console.log(`Plan captured -> ${planPath}.md`)
     debugLog(`State written for session ${sessionId}\n`, DEBUG_LOG)
