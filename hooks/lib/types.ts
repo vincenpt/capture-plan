@@ -13,8 +13,9 @@ export interface PathConfig {
 
 /** Configuration for session document capture. */
 export interface SessionConfig {
-  enabled: boolean
   path: string
+  prompt_max_chars?: number
+  enabled?: boolean
 }
 
 /** Plugin configuration loaded from the 3-layer TOML config cascade. */
@@ -82,7 +83,7 @@ export interface ToolsLogResult {
 
 /** Absolute path to the hooks/ directory (derived from the running script). */
 export const HOOKS_DIR = dirname(Bun.main)
-/** Absolute path to the plugin root directory (parent of hooks/). */
-export const PLUGIN_ROOT = dirname(HOOKS_DIR)
+/** Absolute path to the plugin root directory. Prefers CLAUDE_PLUGIN_ROOT env var (set by CC for plugin hooks) over Bun.main derivation to avoid symlink resolution issues. */
+export const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || dirname(HOOKS_DIR)
 /** True when the plugin is running from a symlinked dev repo (has .git dir). */
 export const IS_DEV_MODE: boolean = existsSync(join(PLUGIN_ROOT, ".git"))

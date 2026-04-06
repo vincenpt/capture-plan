@@ -5,6 +5,7 @@
 import { join } from "node:path"
 import { PLAN_SYSTEM_PROMPT } from "./lib/prompts.ts"
 import {
+  appendEvent,
   appendOrCreateCallout,
   createVaultNote,
   debugLog,
@@ -26,6 +27,7 @@ import {
   loadConfig,
   nextCounter,
   padCounter,
+  readAndClearEvents,
   readCcVersion,
   resolveContextCap,
   type SessionState,
@@ -181,7 +183,8 @@ async function main(): Promise<void> {
     const ccVersion = detectCcVersion() ?? readCcVersion(sessionId)
     const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
-    const sessionYaml = formatSessionYaml(sessionId, config.session.enabled, config.session.path)
+    const sessionEnabled = config.session.enabled ?? false
+    const sessionYaml = formatSessionYaml(sessionId, sessionEnabled, config.session.path)
 
     const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}${sessionYaml}${ccVersionYaml}${modelYaml}
@@ -200,6 +203,10 @@ ${stripTitleLine(planContent)}
       process.exit(0)
     }
 
+    // Record mode exit and flush buffered events
+    appendEvent(sessionId, { ts: new Date().toISOString(), type: "mode:normal" })
+    const bufferedEvents = readAndClearEvents(sessionId)
+
     // Create/update session document if enabled
     upsertSessionDoc({
       sessionId,
@@ -207,6 +214,8 @@ ${stripTitleLine(planContent)}
       vault: config.vault,
       project,
       plans: [{ path: planPath, title }],
+      mode: "normal",
+      events: bufferedEvents,
     })
 
     // Build journal callout revision and append (grouping by title)

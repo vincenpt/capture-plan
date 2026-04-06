@@ -7,6 +7,7 @@ import { basename, join } from "node:path"
 import { DONE_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, SKILL_SYSTEM_PROMPT } from "./lib/prompts.ts"
 import { IS_DEV_MODE } from "./lib/types.ts"
 import {
+  appendEvent,
   appendOrCreateCallout,
   type Config,
   createVaultNote,
@@ -34,6 +35,7 @@ import {
   mergeTags,
   nextCounter,
   padCounter,
+  readAndClearEvents,
   readCcVersion,
   resolveContextCap,
   type SessionState,
@@ -130,7 +132,11 @@ async function buildSuperpowersState(
   const ccVersion = detectCcVersion() ?? readCcVersion(sessionId)
   const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
-  const spSessionYaml = formatSessionYaml(sessionId, config.session.enabled, config.session.path)
+  const spSessionYaml = formatSessionYaml(
+    sessionId,
+    config.session.enabled ?? false,
+    config.session.path,
+  )
 
   const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}${spSessionYaml}${ccVersionYaml}${modelYaml}
@@ -310,7 +316,11 @@ async function buildSkillState(
     .filter(Boolean)
     .join("\n\n---\n\n")
 
-  const skillSessionYaml = formatSessionYaml(sessionId, config.session.enabled, config.session.path)
+  const skillSessionYaml = formatSessionYaml(
+    sessionId,
+    config.session.enabled ?? false,
+    config.session.path,
+  )
 
   const noteContent = `---
 created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}${skillSessionYaml}${ccVersionYaml}${modelYaml}
@@ -405,6 +415,17 @@ async function main(): Promise<void> {
     // Load config early — needed for vault-based state lookup
     const config = await loadConfig(payload.cwd)
 
+    // Buffer a stop event and collect all pending events for flush
+    appendEvent(sessionId, { ts: new Date().toISOString(), type: "stop" })
+
+    /** Flush buffered session events to the vault doc. Called on all exit paths. */
+    const flushEvents = (): void => {
+      if (!config.session.enabled ?? false) return
+      const events = readAndClearEvents(sessionId)
+      if (events.length === 0) return
+      upsertSessionDoc({ sessionId, session: config.session, vault: config.vault, events })
+    }
+
     // Find transcript early — needed for both plan-mode and superpowers paths
     let transcriptPath = payload.transcript_path || null
     if (!transcriptPath) {
@@ -425,6 +446,7 @@ async function main(): Promise<void> {
 
       if (!transcriptPath) {
         debugLog("Cannot find transcript, keeping state for retry\n", DEBUG_LOG)
+        flushEvents()
         process.exit(0)
       }
 
@@ -450,11 +472,15 @@ async function main(): Promise<void> {
       if (boundaryIdx === -1) {
         debugLog("No plan boundary found in transcript\n", DEBUG_LOG)
         deleteVaultState(state.plan_dir, config.vault)
+        flushEvents()
         process.exit(0)
       }
     } else {
       // No state — cheap pre-check before full transcript parse (single file read)
-      if (!transcriptPath) process.exit(0)
+      if (!transcriptPath) {
+        flushEvents()
+        process.exit(0)
+      }
 
       const rawTranscript = readFileSync(transcriptPath, "utf8")
       const specPat = config.superpowers_spec_pattern || "/superpowers/specs/"
@@ -462,13 +488,19 @@ async function main(): Promise<void> {
       const hasSuperpowers = transcriptContainsPatternInString(rawTranscript, [specPat, planPat])
       const hasSkills = transcriptContainsPatternInString(rawTranscript, ['"Skill"'])
 
-      if (!hasSuperpowers && !hasSkills) process.exit(0)
+      if (!hasSuperpowers && !hasSkills) {
+        flushEvents()
+        process.exit(0)
+      }
 
       entries = parseTranscriptFromString(rawTranscript)
 
       if (hasSuperpowers) {
         const spWrites = findSuperpowersWrites(entries, specPat, planPat)
-        if (spWrites.length === 0 && !hasSkills) process.exit(0)
+        if (spWrites.length === 0 && !hasSkills) {
+          flushEvents()
+          process.exit(0)
+        }
 
         if (spWrites.length > 0) {
           isSuperpowers = true
@@ -477,6 +509,7 @@ async function main(): Promise<void> {
           const result = await buildSuperpowersState(sessionId, spWrites, entries, payload, config)
           if (!result) {
             debugLog("Failed to build superpowers state\n", DEBUG_LOG)
+            flushEvents()
             process.exit(0)
           }
 
@@ -489,6 +522,7 @@ async function main(): Promise<void> {
       if (!state && hasSkills) {
         if (IS_DEV_MODE) {
           debugLog("Dev mode detected, skipping skill-only capture\n", DEBUG_LOG)
+          flushEvents()
           process.exit(0)
         }
 
@@ -496,7 +530,10 @@ async function main(): Promise<void> {
           findSkillInvocations(entries),
           config.capture_skills,
         )
-        if (skillInvocations.length === 0) process.exit(0)
+        if (skillInvocations.length === 0) {
+          flushEvents()
+          process.exit(0)
+        }
 
         debugLog(
           `Skill session detected: ${skillInvocations.map((s) => s.skill).join(", ")}\n`,
@@ -506,6 +543,7 @@ async function main(): Promise<void> {
         const result = await buildSkillState(sessionId, skillInvocations, entries, payload, config)
         if (!result) {
           debugLog("Failed to build skill state\n", DEBUG_LOG)
+          flushEvents()
           process.exit(0)
         }
 
@@ -513,7 +551,10 @@ async function main(): Promise<void> {
         boundaryIdx = result.boundaryIdx
       }
 
-      if (!state) process.exit(0)
+      if (!state) {
+        flushEvents()
+        process.exit(0)
+      }
     }
 
     // Check for execution activity after the planning boundary
@@ -521,11 +562,13 @@ async function main(): Promise<void> {
       debugLog("No execution tools after plan boundary, waiting for next Stop\n", DEBUG_LOG)
       if (!isSuperpowers) {
         // For plan-mode, keep state for retry. For superpowers, state is ephemeral.
+        flushEvents()
         process.exit(0)
       }
       // Superpowers: still capture the plan note even without execution
       // (state was already created with vault note in buildSuperpowersState)
       deleteVaultState(state.plan_dir, config.vault)
+      flushEvents()
       process.exit(0)
     }
 
@@ -558,6 +601,7 @@ async function main(): Promise<void> {
         `Done text too short (transcript=${stats.allAssistantText.length}, payload=${payloadMessage.length} chars), keeping state for retry\n`,
         DEBUG_LOG,
       )
+      flushEvents()
       process.exit(0) // Keep state — next Stop event can retry
     }
 
@@ -649,6 +693,7 @@ ${fileList}
         DEBUG_LOG,
       )
       deleteVaultState(state.plan_dir, config.vault)
+      flushEvents()
       process.exit(0)
     }
 
@@ -791,8 +836,9 @@ ${contextText || "_No context captured_"}
       config.vault,
     )
 
-    // Create/update session document with all back-links
+    // Create/update session document with all back-links and flush buffered events
     const planNoteName = state.source === "skill" ? "activity" : "plan"
+    const pendingEvents = readAndClearEvents(sessionId)
     upsertSessionDoc({
       sessionId,
       session: config.session,
@@ -819,6 +865,7 @@ ${contextText || "_No context captured_"}
       ...(state.source === "skill"
         ? { activities: [{ path: `${state.plan_dir}/${planNoteName}`, title: state.plan_title }] }
         : { plans: [{ path: `${state.plan_dir}/${planNoteName}`, title: state.plan_title }] }),
+      events: pendingEvents,
     })
 
     // Clean up session state from vault

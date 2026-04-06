@@ -27,9 +27,10 @@ date_scheme = "calendar"   # calendar | compact | monthly | flat
 # Skills during plan-mode/superpowers sessions are always captured.
 capture_skills = ["simplify"]
 
-# Session document capture (disabled by default)
-# When enabled, creates session documents that cross-link to plans/summaries/tools.
+# Session document capture (toggle via /session skill)
+# Creates session documents that cross-link to plans/summaries/tools.
 # Path segments use ID-based bucketing: <path>/<first-2-chars>/<remaining-id>.md
 # [session]
-# enabled = true
+# enabled = false
 # path = "Claude/Sessions"
+# prompt_max_chars = 1000
