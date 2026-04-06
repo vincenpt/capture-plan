@@ -26,6 +26,15 @@ Claude/Plans/
                   └── agents/          (if subagents used)
 ```
 
+Session documents (when `session.enabled = true`):
+```
+Claude/Sessions/
+  └── <project>/
+      ├── 001-<id-prefix>.md
+      ├── 002-<id-prefix>.md
+      └── …
+```
+
 ## Prerequisites
 
 1. **[Bun](https://bun.sh)** runtime (v1.0+)
@@ -141,6 +150,14 @@ date_scheme = "calendar"   # calendar | compact | monthly | flat
 # Only skill-only sessions matching this list are captured.
 # Skills during plan-mode/superpowers sessions are always captured.
 # capture_skills = ["simplify"]
+
+# Session document capture (toggle via /session skill)
+# Creates session documents that cross-link to plans/summaries/tools.
+# Path uses project-based grouping: <path>/<project>/<counter>-<id-prefix>.md
+[session]
+enabled = false
+path = "Claude/Sessions"
+prompt_max_chars = 1000
 ```
 
 The `date_scheme` setting controls how date segments are formatted in vault paths. Four schemes are available:
@@ -168,7 +185,9 @@ The plugin uses two hooks that run at different points in a Claude Code session:
    - **Superpowers** — No ExitPlanMode needed. Scans the transcript for Write tool calls whose `file_path` matches `superpowers_spec_pattern` or `superpowers_plan_pattern`. Creates the plan note on the fly, then captures execution results the same way as plan mode.
    - **Skill-only** — Detected when the transcript contains Skill tool invocations but no plan-mode or superpowers activity. Filtered by the `capture_skills` whitelist. Creates an activity note with a skill invocation table, then captures execution results.
 
-A **SessionStart** hook (`capture-session-start.ts`) also runs at the beginning of each session to detect the context window size and Claude Code version, writing a hint file that downstream hooks use for metadata.
+A **SessionStart** hook (`capture-session-start.ts`) runs at the beginning of each session to detect the context window size and Claude Code version, writing a hint file that downstream hooks use for metadata. When `session.enabled` is `true`, it also creates the initial session document in the vault.
+
+A **session event** hook (`capture-session-event.ts`) handles mid-session lifecycle events when session capture is enabled. It records user prompts (code-fenced, truncated to `prompt_max_chars`), plan mode transitions, subagent start/stop, and context compaction events. Each event is appended as a timestamped heading under the session document's Events section.
 
 ### Companion notes
 
@@ -182,6 +201,7 @@ Each captured session produces a directory of related notes:
 | `tools-stats.md` | Session metrics: model, duration, token counts (in/out/cache), context %, subagent count, tool call/error totals, MCP servers. Planning and execution phases shown separately plus combined totals |
 | `tools-log.md` | Chronological tool call log: each turn shows timestamp, duration, token usage, justification text, and tool arguments as markdown tables. Bash commands appear as shell code fences |
 | `agents/` | Subagent prompts extracted into separate notes with their own frontmatter (subagent type, model, token/duration stats, backlink to the dispatching turn in tools-log) |
+| `<session>.md` | Session log: timestamped lifecycle events (prompts, plan mode, subagents, compaction, stop). Lives under `Claude/Sessions/<project>/` |
 | `spec.md` | Superpowers only: the spec file content, linked to the plan note |
 
 ### Note frontmatter
@@ -234,6 +254,18 @@ Migrates existing vault plan directories and journal files from one date directo
 ### `/rewrite-journal`
 
 Reconstructs the daily journal for a selected day by reading all plan and summary notes for that date. Backs up the existing journal file before rewriting. Offers AI summaries (Claude Haiku) or fast text extraction. Walks through day selection, dry run preview, execution, and optional backup cleanup.
+
+### `/config-print`
+
+Displays all config options in a table showing the effective value and which config layer (default, plugin, user, or project) set each one. Also lists config file paths and whether each exists.
+
+### `/session`
+
+Toggles session document capture on or off. Pass `on`, `off`, or no argument to toggle the current state. Asks where to save the setting (project-local `.claude/capture-plan.toml` or user-global `~/.config/capture-plan/config.toml`). The change takes effect on the next session start.
+
+### `/session-print`
+
+Shows current session statistics: session ID, project, model, Claude Code version, duration, and whether session capture is enabled. Also displays activity counts (prompts, plan mode entries, compactions, subagent launches), token usage breakdown (input, output, cache read/create, peak context), top tools by call count, and connected MCP servers.
 
 ## Developer Commands
 
