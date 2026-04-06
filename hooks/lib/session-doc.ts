@@ -1,10 +1,18 @@
 // session-doc.ts — Session document creation and upsert logic
 
-import { readdirSync } from "node:fs"
+import { readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { createVaultNote, getVaultPath, readVaultNote, runObsidian } from "./obsidian.ts"
+import { contextHintPath, readContextHintFull } from "./config.ts"
+import {
+  createVaultNote,
+  getVaultPath,
+  readVaultNote,
+  removeVaultProperty,
+  runObsidian,
+  setVaultProperty,
+} from "./obsidian.ts"
 import { formatEventLine, type SessionEvent } from "./session-events.ts"
-import { ensureMdExt, padCounter, toSlug } from "./text.ts"
+import { ensureMdExt, padCounter, shortSessionId, toSlug } from "./text.ts"
 import type { SessionConfig } from "./types.ts"
 
 const COUNTER_PREFIX_RE = /^(\d{3,})-/
@@ -322,8 +330,130 @@ export function relocateSessionDoc(opts: RelocateSessionDocOpts): string | null 
   const result = createVaultNote(newDocPath, content, opts.vault)
   if (!result.success) return null
 
+  // Update session: property in all documents that reference this session
+  const allLinks = [...plans, ...summaries, ...toolsStats, ...toolsLogs, ...activities]
+  if (allLinks.length > 0) {
+    updateSessionBacklinks(newDocPath, sessionId, allLinks, opts.vault)
+  }
+
   // Delete the old doc
   runObsidian(["delete", `path=${ensureMdExt(opts.oldDocPath)}`, "permanent"], opts.vault)
 
   return newDocPath
+}
+
+/** Update the `session:` frontmatter property on all documents that a session doc links to. */
+function updateSessionBacklinks(
+  newDocPath: string,
+  sessionId: string,
+  allLinks: SessionLink[],
+  vault?: string,
+): void {
+  const sessionWikilink = `[[${newDocPath}|${shortSessionId(sessionId)}]]`
+  for (const link of allLinks) {
+    setVaultProperty(link.path, "session", sessionWikilink, "text", vault)
+  }
+}
+
+/** Remove the `session:` frontmatter property from all documents that a session doc links to. */
+export function removeSessionBacklinks(allLinks: SessionLink[], vault?: string): void {
+  for (const link of allLinks) {
+    removeVaultProperty(link.path, "session", vault)
+  }
+}
+
+/** Options for ensuring a session document is relocated to the correct project folder. */
+export interface EnsureSessionRelocatedOpts {
+  sessionId: string
+  cachedDocPath: string | undefined
+  project: string | undefined
+  session: SessionConfig
+  vault?: string
+}
+
+/** Check if a cached session doc is under no-project and relocate if project is now known. When cachedDocPath is missing, discovers the session doc in the vault. Returns the (possibly updated) doc path. Updates the hint file on success. */
+export function ensureSessionRelocated(opts: EnsureSessionRelocatedOpts): string | undefined {
+  const { cachedDocPath, project, sessionId } = opts
+
+  // When no cached path, discover the session doc in the vault
+  if (!cachedDocPath) {
+    if (!project) return undefined
+    const projectSlug = toSlug(project)
+    const discovered = findSessionDoc(opts.session.path, sessionId, projectSlug, opts.vault)
+    if (discovered) {
+      updateHintPath(sessionId, discovered)
+      return discovered
+    }
+    // Also check no-project in case it was created there
+    const noProjectDoc = findSessionDoc(
+      opts.session.path,
+      sessionId,
+      FALLBACK_PROJECT_SLUG,
+      opts.vault,
+    )
+    if (noProjectDoc) {
+      // Found under no-project — relocate it
+      const newPath = relocateSessionDoc({
+        oldDocPath: noProjectDoc,
+        newProject: project,
+        session: opts.session,
+        vault: opts.vault,
+      })
+      const resolved = newPath ?? noProjectDoc
+      updateHintPath(sessionId, resolved)
+      return resolved
+    }
+    return undefined
+  }
+
+  if (!cachedDocPath.includes(`/${FALLBACK_PROJECT_SLUG}/`)) return cachedDocPath
+  if (!project) return cachedDocPath
+
+  const newPath = relocateSessionDoc({
+    oldDocPath: cachedDocPath,
+    newProject: project,
+    session: opts.session,
+    vault: opts.vault,
+  })
+  if (!newPath) return cachedDocPath
+
+  updateHintPath(sessionId, newPath)
+  return newPath
+}
+
+/** Update the session_doc_path in the hint file. */
+function updateHintPath(sessionId: string, docPath: string): void {
+  const hint = readContextHintFull(sessionId)
+  if (hint) {
+    writeFileSync(
+      contextHintPath(sessionId),
+      JSON.stringify({ ...hint, session_doc_path: docPath }),
+    )
+  }
+}
+
+/** Find an existing session doc by scanning a project directory. Returns the vault-relative path if found, null otherwise. */
+function findSessionDoc(
+  sessionPath: string,
+  sessionId: string,
+  projectSlug: string,
+  vault?: string,
+): string | null {
+  const firstSegment = sessionId.split("-")[0]
+  const vaultPath = getVaultPath(vault)
+  if (!vaultPath) return null
+  const projectDir = join(vaultPath, sessionPath, projectSlug)
+  let entries: string[]
+  try {
+    entries = readdirSync(projectDir)
+  } catch {
+    return null
+  }
+  for (const entry of entries) {
+    const name = entry.replace(/\.md$/, "")
+    if (COUNTER_PREFIX_RE.test(name) && name.endsWith(firstSegment)) {
+      return `${sessionPath}/${projectSlug}/${name}`
+    }
+  }
+  return null
 }

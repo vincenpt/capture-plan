@@ -10,6 +10,7 @@ import {
   createVaultNote,
   debugLog,
   detectCcVersion,
+  ensureSessionRelocated,
   extractTitle,
   findTranscriptPath,
   formatCcVersionYaml,
@@ -185,12 +186,18 @@ async function main(): Promise<void> {
     const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
     const sessionEnabled = config.session.enabled ?? false
-    const cachedSessionDocPath = planHint?.session_doc_path
+    const resolvedSessionDocPath = ensureSessionRelocated({
+      sessionId,
+      cachedDocPath: planHint?.session_doc_path,
+      project,
+      session: config.session,
+      vault: config.vault,
+    })
     const sessionYaml = formatSessionYaml(
       sessionId,
       sessionEnabled,
       config.session.path,
-      cachedSessionDocPath,
+      resolvedSessionDocPath,
     )
 
     const noteContent = `---
@@ -220,7 +227,7 @@ ${stripTitleLine(planContent)}
       session: config.session,
       vault: config.vault,
       project,
-      sessionDocPath: cachedSessionDocPath,
+      sessionDocPath: resolvedSessionDocPath,
       plans: [{ path: planPath, title }],
       mode: "normal",
       events: bufferedEvents,

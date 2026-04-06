@@ -14,6 +14,7 @@ import {
   debugLog,
   deleteVaultState,
   detectCcVersion,
+  ensureSessionRelocated,
   extractTitle,
   findTranscriptPath,
   formatCcVersionYaml,
@@ -86,6 +87,7 @@ async function buildSuperpowersState(
   entries: TranscriptEntry[],
   payload: StopPayload,
   config: Config,
+  sessionDocPath?: string,
 ): Promise<{ state: SessionState; boundaryIdx: number } | null> {
   // Pick primary: prefer plan over spec
   const plans = writes.filter((w) => w.type === "plan")
@@ -137,7 +139,7 @@ async function buildSuperpowersState(
     sessionId,
     config.session.enabled ?? false,
     config.session.path,
-    spHint?.session_doc_path,
+    sessionDocPath ?? spHint?.session_doc_path,
   )
 
   const noteContent = `---
@@ -230,6 +232,7 @@ async function buildSkillState(
   entries: TranscriptEntry[],
   payload: StopPayload,
   config: Config,
+  sessionDocPath?: string,
 ): Promise<{ state: SessionState; boundaryIdx: number } | null> {
   if (invocations.length === 0) return null
 
@@ -323,7 +326,7 @@ async function buildSkillState(
     sessionId,
     config.session.enabled ?? false,
     config.session.path,
-    skillHint?.session_doc_path,
+    sessionDocPath ?? skillHint?.session_doc_path,
   )
 
   const noteContent = `---
@@ -423,7 +426,13 @@ async function main(): Promise<void> {
     appendEvent(sessionId, { ts: new Date().toISOString(), type: "stop" })
 
     const mainHint = readContextHintFull(sessionId)
-    const cachedSessionDocPath = mainHint?.session_doc_path
+    const cachedSessionDocPath = ensureSessionRelocated({
+      sessionId,
+      cachedDocPath: mainHint?.session_doc_path,
+      project: getProjectName(payload.cwd),
+      session: config.session,
+      vault: config.vault,
+    })
 
     /** Flush buffered session events to the vault doc. Called on all exit paths. */
     const flushEvents = (): void => {
@@ -519,7 +528,14 @@ async function main(): Promise<void> {
           isSuperpowers = true
           debugLog(`Superpowers session detected: ${spWrites.length} spec/plan writes\n`, DEBUG_LOG)
 
-          const result = await buildSuperpowersState(sessionId, spWrites, entries, payload, config)
+          const result = await buildSuperpowersState(
+            sessionId,
+            spWrites,
+            entries,
+            payload,
+            config,
+            cachedSessionDocPath,
+          )
           if (!result) {
             debugLog("Failed to build superpowers state\n", DEBUG_LOG)
             flushEvents()
@@ -553,7 +569,14 @@ async function main(): Promise<void> {
           DEBUG_LOG,
         )
 
-        const result = await buildSkillState(sessionId, skillInvocations, entries, payload, config)
+        const result = await buildSkillState(
+          sessionId,
+          skillInvocations,
+          entries,
+          payload,
+          config,
+          cachedSessionDocPath,
+        )
         if (!result) {
           debugLog("Failed to build skill state\n", DEBUG_LOG)
           flushEvents()

@@ -147,6 +147,13 @@ export function setVaultProperty(
   return result.exitCode === 0
 }
 
+/** Remove a frontmatter property from a vault note via the Obsidian CLI. Returns true on success. */
+export function removeVaultProperty(pathRel: string, name: string, vault?: string): boolean {
+  const pathWithExt = ensureMdExt(pathRel)
+  const result = runObsidian(["property:remove", `name=${name}`, `path=${pathWithExt}`], vault)
+  return result.exitCode === 0
+}
+
 /** Ensure a vault directory exists by creating and deleting a placeholder file.
  *  The Obsidian CLI `create` command creates parent directories automatically. */
 export function ensureVaultDir(dirRel: string, vault?: string): void {

@@ -10,12 +10,11 @@ import {
   createSessionDoc,
   debugLog,
   detectCcVersion,
-  FALLBACK_PROJECT_SLUG,
+  ensureSessionRelocated,
   getProjectName,
   loadConfig,
   readAndClearEvents,
   readContextHintFull,
-  relocateSessionDoc,
   truncatePrompt,
   upsertSessionDoc,
 } from "./shared.ts"
@@ -103,7 +102,7 @@ async function main(): Promise<void> {
     if (eventName === "PostToolUse" && toolName === "EnterPlanMode") {
       appendEvent(sessionId, { ts: now, type: "mode:plan" })
       // Flush: mode transition is significant
-      flushToVault(sessionId, config, "plan")
+      flushToVault(sessionId, config, payload.cwd, "plan")
       return
     }
 
@@ -133,7 +132,7 @@ async function main(): Promise<void> {
     if (eventName === "PostCompact") {
       appendEvent(sessionId, { ts: now, type: "compact:post" })
       // Flush: context pressure is significant
-      flushToVault(sessionId, config)
+      flushToVault(sessionId, config, payload.cwd)
       return
     }
 
@@ -145,36 +144,33 @@ async function main(): Promise<void> {
 }
 
 /** Flush buffered events to the vault session document. */
-function flushToVault(sessionId: string, config: Config, mode?: "normal" | "plan"): void {
+function flushToVault(
+  sessionId: string,
+  config: Config,
+  cwd?: string,
+  mode?: "normal" | "plan",
+): void {
   const events = readAndClearEvents(sessionId)
   if (events.length === 0 && !mode) return
 
-  let hint = readContextHintFull(sessionId)
-
-  // Relocate session doc from no-project to the correct project folder
-  const docPath = hint?.session_doc_path
-  if (docPath?.includes(`/${FALLBACK_PROJECT_SLUG}/`)) {
-    const project = getProjectName(process.cwd())
-    if (project) {
-      const newPath = relocateSessionDoc({
-        oldDocPath: docPath,
-        newProject: project,
-        session: config.session,
-        vault: config.vault,
-      })
-      if (newPath && hint) {
-        hint = { ...hint, session_doc_path: newPath }
-        writeFileSync(contextHintPath(sessionId), JSON.stringify(hint))
-        debugLog(`SessionEvent: relocated session doc to ${newPath}\n`, DEBUG_LOG)
-      }
-    }
+  const hint = readContextHintFull(sessionId)
+  const project = getProjectName(cwd ?? process.cwd())
+  const resolvedPath = ensureSessionRelocated({
+    sessionId,
+    cachedDocPath: hint?.session_doc_path,
+    project,
+    session: config.session,
+    vault: config.vault,
+  })
+  if (resolvedPath !== hint?.session_doc_path) {
+    debugLog(`SessionEvent: relocated session doc to ${resolvedPath}\n`, DEBUG_LOG)
   }
 
   upsertSessionDoc({
     sessionId,
     session: config.session,
     vault: config.vault,
-    sessionDocPath: hint?.session_doc_path,
+    sessionDocPath: resolvedPath,
     ...(mode ? { mode } : {}),
     events,
   })
