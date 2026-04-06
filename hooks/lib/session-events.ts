@@ -35,20 +35,14 @@ export function appendEvent(sessionId: string, event: SessionEvent): void {
   appendFileSync(eventBufferPath(sessionId), `${line}\n`)
 }
 
-/** Read all buffered events and delete the buffer file. Returns an empty array if the file does not exist. */
-export function readAndClearEvents(sessionId: string): SessionEvent[] {
+/** Read all buffered events without deleting the buffer file. Returns an empty array if the file does not exist. */
+export function readEvents(sessionId: string): SessionEvent[] {
   const path = eventBufferPath(sessionId)
   let raw: string
   try {
     raw = readFileSync(path, "utf8")
   } catch {
     return []
-  }
-
-  try {
-    unlinkSync(path)
-  } catch {
-    /* ignore cleanup failure */
   }
 
   const events: SessionEvent[] = []
@@ -59,6 +53,19 @@ export function readAndClearEvents(sessionId: string): SessionEvent[] {
       events.push(JSON.parse(trimmed) as SessionEvent)
     } catch {
       /* skip malformed lines */
+    }
+  }
+  return events
+}
+
+/** Read all buffered events and delete the buffer file. Returns an empty array if the file does not exist. */
+export function readAndClearEvents(sessionId: string): SessionEvent[] {
+  const events = readEvents(sessionId)
+  if (events.length > 0) {
+    try {
+      unlinkSync(eventBufferPath(sessionId))
+    } catch {
+      /* ignore cleanup failure */
     }
   }
   return events

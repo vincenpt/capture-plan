@@ -28,8 +28,7 @@ import {
   nextCounter,
   padCounter,
   readAndClearEvents,
-  readCcVersion,
-  readSessionDocPath,
+  readContextHintFull,
   resolveContextCap,
   type SessionState,
   stripTitleLine,
@@ -181,11 +180,12 @@ async function main(): Promise<void> {
 
     const contextCap = resolveContextCap(stats?.peakTurnContext ?? 0, config.context_cap, sessionId)
     const modelYaml = formatModelYaml(stats, contextCap)
-    const ccVersion = detectCcVersion() ?? readCcVersion(sessionId)
+    const planHint = readContextHintFull(sessionId)
+    const ccVersion = detectCcVersion() ?? planHint?.cc_version
     const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
     const sessionEnabled = config.session.enabled ?? false
-    const cachedSessionDocPath = readSessionDocPath(sessionId)
+    const cachedSessionDocPath = planHint?.session_doc_path
     const sessionYaml = formatSessionYaml(
       sessionId,
       sessionEnabled,

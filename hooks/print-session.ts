@@ -1,13 +1,11 @@
 #!/usr/bin/env bun
 // print-session.ts — Print current session stats as JSON for the /session-print skill
 
-import { readFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import type { ContextHint } from "./capture-session-start.ts"
 import { findActiveSession, findTranscriptPath } from "./lib/config.ts"
-import { eventBufferPath, type SessionEvent } from "./lib/session-events.ts"
+import { formatDuration } from "./lib/dates.ts"
+import { readEvents } from "./lib/session-events.ts"
 import { getProjectName, shortSessionId } from "./lib/text.ts"
+import { readContextHintFull } from "./shared.ts"
 import { collectTranscriptStats, parseTranscript, type TranscriptStats } from "./transcript.ts"
 
 /** Output shape for the session-print skill. */
@@ -47,53 +45,6 @@ interface SessionPrintOutput {
     totalErrors: number
   } | null
   error: string | null
-}
-
-/** Format milliseconds as a human-readable duration string (e.g. "1h 23m 45s"). */
-function formatDuration(ms: number): string {
-  if (ms <= 0) return "0s"
-  const seconds = Math.floor(ms / 1000)
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = seconds % 60
-  const parts: string[] = []
-  if (h > 0) parts.push(`${h}h`)
-  if (m > 0) parts.push(`${m}m`)
-  if (s > 0 || parts.length === 0) parts.push(`${s}s`)
-  return parts.join(" ")
-}
-
-/** Read the context hint file for a known session ID. Returns null if missing or unreadable. */
-function readHintForSession(sessionId: string): ContextHint | null {
-  try {
-    const hintFile = join(tmpdir(), `capture-plan-context-${sessionId}.json`)
-    return JSON.parse(readFileSync(hintFile, "utf8")) as ContextHint
-  } catch {
-    return null
-  }
-}
-
-/** Read events from the JSONL buffer non-destructively. */
-function readEvents(sessionId: string): SessionEvent[] {
-  const path = eventBufferPath(sessionId)
-  let raw: string
-  try {
-    raw = readFileSync(path, "utf8")
-  } catch {
-    return []
-  }
-
-  const events: SessionEvent[] = []
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim()
-    if (!trimmed) continue
-    try {
-      events.push(JSON.parse(trimmed) as SessionEvent)
-    } catch {
-      /* skip malformed lines */
-    }
-  }
-  return events
 }
 
 /** Build transcript stats section from the JSONL transcript file. */
@@ -156,7 +107,7 @@ if (!ccSession) emitError("No active CC session found for this CWD")
 const sessionId = ccSession.sessionId
 
 // Secondary: read plugin-specific metadata from context hint (if available)
-const hint = readHintForSession(sessionId)
+const hint = readContextHintFull(sessionId)
 
 const events = readEvents(sessionId)
 

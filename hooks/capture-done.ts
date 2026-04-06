@@ -36,8 +36,7 @@ import {
   nextCounter,
   padCounter,
   readAndClearEvents,
-  readCcVersion,
-  readSessionDocPath,
+  readContextHintFull,
   resolveContextCap,
   type SessionState,
   scanForVaultState,
@@ -130,15 +129,15 @@ async function buildSuperpowersState(
     sessionId,
   )
   const modelYaml = formatModelYaml(planStats, contextCap)
-  const ccVersion = detectCcVersion() ?? readCcVersion(sessionId)
+  const spHint = readContextHintFull(sessionId)
+  const ccVersion = detectCcVersion() ?? spHint?.cc_version
   const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
-  const spCachedSessionDocPath = readSessionDocPath(sessionId)
   const spSessionYaml = formatSessionYaml(
     sessionId,
     config.session.enabled ?? false,
     config.session.path,
-    spCachedSessionDocPath,
+    spHint?.session_doc_path,
   )
 
   const noteContent = `---
@@ -285,7 +284,8 @@ async function buildSkillState(
     sessionId,
   )
   const modelYaml = formatModelYaml(planStats, contextCap)
-  const ccVersion = detectCcVersion() ?? readCcVersion(sessionId)
+  const skillHint = readContextHintFull(sessionId)
+  const ccVersion = detectCcVersion() ?? skillHint?.cc_version
   const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
   // Build skills YAML list
@@ -319,12 +319,11 @@ async function buildSkillState(
     .filter(Boolean)
     .join("\n\n---\n\n")
 
-  const skillCachedDocPath = readSessionDocPath(sessionId)
   const skillSessionYaml = formatSessionYaml(
     sessionId,
     config.session.enabled ?? false,
     config.session.path,
-    skillCachedDocPath,
+    skillHint?.session_doc_path,
   )
 
   const noteContent = `---
@@ -423,11 +422,12 @@ async function main(): Promise<void> {
     // Buffer a stop event and collect all pending events for flush
     appendEvent(sessionId, { ts: new Date().toISOString(), type: "stop" })
 
-    const cachedSessionDocPath = readSessionDocPath(sessionId)
+    const mainHint = readContextHintFull(sessionId)
+    const cachedSessionDocPath = mainHint?.session_doc_path
 
     /** Flush buffered session events to the vault doc. Called on all exit paths. */
     const flushEvents = (): void => {
-      if (!config.session.enabled ?? false) return
+      if (!(config.session.enabled ?? false)) return
       const events = readAndClearEvents(sessionId)
       if (events.length === 0) return
       upsertSessionDoc({
@@ -677,7 +677,7 @@ async function main(): Promise<void> {
       sessionId,
     )
     const modelYaml = formatModelYaml(transcriptStats, contextCap)
-    const ccVersion = state.cc_version ?? readCcVersion(sessionId)
+    const ccVersion = state.cc_version ?? mainHint?.cc_version
     const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
     const noteContent = `---

@@ -69,6 +69,19 @@ export interface ContextHintResult {
   cc_version?: string
 }
 
+/** Data written to a temp file at session start for downstream hooks to discover context cap, version, and session state. */
+export interface ContextHint {
+  session_id: string
+  context_cap?: number
+  model?: string
+  cc_version?: string
+  source: string
+  session_enabled: boolean
+  transcript_path?: string
+  /** Cached vault path for the session document (set after creation). */
+  session_doc_path?: string
+}
+
 /** A subagent prompt to be written as a separate note in the vault. */
 export interface AgentFileEntry {
   path: string // Obsidian vault path (no .md extension)

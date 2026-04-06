@@ -5,7 +5,13 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DATE_SCHEMES, type DateScheme } from "./dates.ts"
 import { filterNoiseTags } from "./text.ts"
-import { type Config, type ContextHintResult, PLUGIN_ROOT, type SessionConfig } from "./types.ts"
+import {
+  type Config,
+  type ContextHint,
+  type ContextHintResult,
+  PLUGIN_ROOT,
+  type SessionConfig,
+} from "./types.ts"
 
 /** Claude Code session file shape at ~/.claude/sessions/{pid}.json. */
 export interface CcSession {
@@ -226,19 +232,29 @@ export async function summarizeWithClaude(
 
 const DEFAULT_CONTEXT_CAP = 200_000
 
+/** Build the path to the context hint file for a session. */
+export function contextHintPath(sessionId: string): string {
+  return join(tmpdir(), `capture-plan-context-${sessionId}.json`)
+}
+
+/** Read the full context hint written by SessionStart. Returns null if missing or unreadable. */
+export function readContextHintFull(sessionId: string): ContextHint | null {
+  try {
+    const raw = readFileSync(contextHintPath(sessionId), "utf8")
+    return JSON.parse(raw) as ContextHint
+  } catch {
+    return null
+  }
+}
+
 /** Read the context hint file written by SessionStart, returning context cap and CC version. */
 export function readContextHint(sessionId: string): ContextHintResult {
-  try {
-    const hintFile = join(tmpdir(), `capture-plan-context-${sessionId}.json`)
-    const raw = readFileSync(hintFile, "utf8")
-    const hint = JSON.parse(raw) as { context_cap?: number; cc_version?: string }
-    return {
-      context_cap:
-        typeof hint.context_cap === "number" && hint.context_cap > 0 ? hint.context_cap : undefined,
-      cc_version: typeof hint.cc_version === "string" ? hint.cc_version : undefined,
-    }
-  } catch {
-    return {}
+  const hint = readContextHintFull(sessionId)
+  if (!hint) return {}
+  return {
+    context_cap:
+      typeof hint.context_cap === "number" && hint.context_cap > 0 ? hint.context_cap : undefined,
+    cc_version: typeof hint.cc_version === "string" ? hint.cc_version : undefined,
   }
 }
 
@@ -249,14 +265,8 @@ export function readCcVersion(sessionId: string): string | undefined {
 
 /** Read the cached session document vault path from the context hint file. */
 export function readSessionDocPath(sessionId: string): string | undefined {
-  try {
-    const hintFile = join(tmpdir(), `capture-plan-context-${sessionId}.json`)
-    const raw = readFileSync(hintFile, "utf8")
-    const hint = JSON.parse(raw) as { session_doc_path?: string }
-    return typeof hint.session_doc_path === "string" ? hint.session_doc_path : undefined
-  } catch {
-    return undefined
-  }
+  const hint = readContextHintFull(sessionId)
+  return typeof hint?.session_doc_path === "string" ? hint.session_doc_path : undefined
 }
 
 /** Parse Claude Code version from `claude --version` output (e.g. "2.1.89 (Claude Code)"). */

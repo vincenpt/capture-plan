@@ -4,12 +4,10 @@
 // and creates the initial session document in the vault.
 
 import { writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { createSessionDoc } from "./lib/session-doc.ts"
 
 import { PLUGIN_ROOT } from "./lib/types.ts"
-import { debugLog, detectCcVersion, getProjectName, loadConfig } from "./shared.ts"
+import { contextHintPath, debugLog, detectCcVersion, getProjectName, loadConfig } from "./shared.ts"
 
 const DEBUG_LOG = "/tmp/capture-plan-debug.log"
 
@@ -23,18 +21,7 @@ interface SessionStartPayload {
   [key: string]: unknown
 }
 
-/** Data written to a temp file at session start for downstream hooks to discover context cap, version, and session state. */
-export interface ContextHint {
-  session_id: string
-  context_cap?: number
-  model?: string
-  cc_version?: string
-  source: string
-  session_enabled: boolean
-  transcript_path?: string
-  /** Cached vault path for the session document (set after creation). */
-  session_doc_path?: string
-}
+export type { ContextHint } from "./lib/types.ts"
 
 /** Parse context window size from a model identifier like "claude-opus-4-6[1m]". */
 export function parseModelContextCap(model: string): number | undefined {
@@ -45,11 +32,6 @@ export function parseModelContextCap(model: string): number | undefined {
   if (unit === "m") return num * 1_000_000
   if (unit === "k") return num * 1_000
   return undefined
-}
-
-/** Build the temp file path where the context hint is stored for a given session. */
-export function contextHintPath(sessionId: string): string {
-  return join(tmpdir(), `capture-plan-context-${sessionId}.json`)
 }
 
 async function main(): Promise<void> {

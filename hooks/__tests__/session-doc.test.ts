@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test"
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createSessionDoc, relocateSessionDoc, upsertSessionDoc } from "../lib/session-doc.ts"
@@ -47,7 +55,6 @@ function mockObsidianCli(): ReturnType<typeof spyOn> {
       const pathArg = findArg("path=")
       if (!pathArg) return err()
       try {
-        const { readFileSync } = require("node:fs")
         const content = readFileSync(join(tempDir, pathArg), "utf8")
         return ok(content)
       } catch {
@@ -70,7 +77,6 @@ function mockObsidianCli(): ReturnType<typeof spyOn> {
       const pathArg = findArg("path=")
       const toArg = findArg("to=")
       if (pathArg && toArg) {
-        const { renameSync } = require("node:fs")
         const absFrom = join(tempDir, pathArg)
         const absTo = join(tempDir, toArg)
         mkdirSync(join(absTo, ".."), { recursive: true })
@@ -99,7 +105,6 @@ function mockObsidianCli(): ReturnType<typeof spyOn> {
       const pathArg = findArg("path=")
       if (!pathArg) return err()
       try {
-        const { statSync } = require("node:fs")
         statSync(join(tempDir, pathArg))
         return ok(`path\t${pathArg}`)
       } catch {
@@ -239,7 +244,7 @@ describe("upsertSessionDoc", () => {
     expect(result).toBe(true)
 
     // Verify the file was created with counter prefix 002
-    const { existsSync } = require("node:fs")
+
     expect(existsSync(join(projectDir, "002-ff001122.md"))).toBe(true)
   })
 
@@ -252,7 +257,7 @@ describe("upsertSessionDoc", () => {
     expect(result).toBe(true)
 
     // The doc should be at 001-aabb1122.md, NOT aabb1122.md
-    const { existsSync } = require("node:fs")
+
     const projectDir = join(tempDir, SESSION_PATH, "test-proj")
     expect(existsSync(join(projectDir, "aabb1122.md"))).toBe(false)
     expect(existsSync(join(projectDir, "001-aabb1122.md"))).toBe(true)

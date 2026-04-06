@@ -2,17 +2,23 @@
 // capture-session-event.ts — Unified handler for session lifecycle hooks
 // Handles: UserPromptSubmit, EnterPlanMode, SubagentStart, SubagentStop, PreCompact, PostCompact
 
-import { readFileSync, writeFileSync } from "node:fs"
-import type { ContextHint } from "./capture-session-start.ts"
-import { contextHintPath } from "./capture-session-start.ts"
+import { writeFileSync } from "node:fs"
 import {
+  appendEvent,
+  type Config,
+  contextHintPath,
   createSessionDoc,
+  debugLog,
+  detectCcVersion,
   FALLBACK_PROJECT_SLUG,
+  getProjectName,
+  loadConfig,
+  readAndClearEvents,
+  readContextHintFull,
   relocateSessionDoc,
+  truncatePrompt,
   upsertSessionDoc,
-} from "./lib/session-doc.ts"
-import { appendEvent, readAndClearEvents, truncatePrompt } from "./lib/session-events.ts"
-import { debugLog, detectCcVersion, getProjectName, loadConfig } from "./shared.ts"
+} from "./shared.ts"
 
 const DEBUG_LOG = "/tmp/capture-plan-debug.log"
 
@@ -31,16 +37,6 @@ interface EventPayload {
   [key: string]: unknown
 }
 
-/** Read the cached context hint for fast session_enabled check. Returns null if unavailable. */
-function readHint(sessionId: string): ContextHint | null {
-  try {
-    const raw = readFileSync(contextHintPath(sessionId), "utf8")
-    return JSON.parse(raw) as ContextHint
-  } catch {
-    return null
-  }
-}
-
 async function main(): Promise<void> {
   try {
     const input = await Bun.stdin.text()
@@ -48,11 +44,13 @@ async function main(): Promise<void> {
     const sessionId = payload.session_id
     if (!sessionId) return
 
+    // Load config once — used by lazy-init, prompt truncation, and flush
+    const config = await loadConfig(payload.cwd)
+
     // Fast-path: check cached session_enabled from context hint
     // If hint is missing (SessionStart had no stdin), bootstrap lazily
-    let hint = readHint(sessionId)
+    let hint = readContextHintFull(sessionId)
     if (!hint) {
-      const config = await loadConfig(payload.cwd)
       const enabled = config.session.enabled ?? false
       const ccVersion = detectCcVersion()
       hint = {
@@ -95,8 +93,6 @@ async function main(): Promise<void> {
       const promptText = payload.user_message ?? ""
       if (!promptText) return
 
-      // Load config for prompt_max_chars
-      const config = await loadConfig(payload.cwd)
       const maxChars = config.session.prompt_max_chars ?? DEFAULT_PROMPT_MAX_CHARS
       const truncated = truncatePrompt(promptText, maxChars)
 
@@ -107,7 +103,7 @@ async function main(): Promise<void> {
     if (eventName === "PostToolUse" && toolName === "EnterPlanMode") {
       appendEvent(sessionId, { ts: now, type: "mode:plan" })
       // Flush: mode transition is significant
-      await flushToVault(sessionId, payload.cwd, "plan")
+      flushToVault(sessionId, config, "plan")
       return
     }
 
@@ -137,7 +133,7 @@ async function main(): Promise<void> {
     if (eventName === "PostCompact") {
       appendEvent(sessionId, { ts: now, type: "compact:post" })
       // Flush: context pressure is significant
-      await flushToVault(sessionId, payload.cwd)
+      flushToVault(sessionId, config)
       return
     }
 
@@ -149,21 +145,16 @@ async function main(): Promise<void> {
 }
 
 /** Flush buffered events to the vault session document. */
-async function flushToVault(
-  sessionId: string,
-  cwd?: string,
-  mode?: "normal" | "plan",
-): Promise<void> {
+function flushToVault(sessionId: string, config: Config, mode?: "normal" | "plan"): void {
   const events = readAndClearEvents(sessionId)
   if (events.length === 0 && !mode) return
 
-  let hint = readHint(sessionId)
-  const config = await loadConfig(cwd)
+  let hint = readContextHintFull(sessionId)
 
   // Relocate session doc from no-project to the correct project folder
   const docPath = hint?.session_doc_path
   if (docPath?.includes(`/${FALLBACK_PROJECT_SLUG}/`)) {
-    const project = getProjectName(cwd ?? process.cwd())
+    const project = getProjectName(process.cwd())
     if (project) {
       const newPath = relocateSessionDoc({
         oldDocPath: docPath,
