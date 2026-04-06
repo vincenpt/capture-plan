@@ -45,7 +45,6 @@ import {
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
-  truncatePrompt,
   updateJournalFrontmatter,
   upsertSessionDoc,
   writeVaultState,
@@ -427,9 +426,7 @@ async function main(): Promise<void> {
 
     // Capture stop timestamp and last assistant message early — used on all exit paths
     const stopTs = new Date().toISOString()
-    const lastMessage = payload.last_assistant_message
-      ? truncatePrompt(payload.last_assistant_message.trim(), 500)
-      : undefined
+    const lastMessage = payload.last_assistant_message?.trim() || undefined
 
     const mainHint = readContextHintFull(sessionId)
     const stopProject = getProjectName(payload.cwd)
