@@ -4,6 +4,7 @@ import {
   appendEvent,
   eventBufferPath,
   formatEventLine,
+  formatStopText,
   readAndClearEvents,
   type SessionEvent,
   truncatePrompt,
@@ -158,6 +159,54 @@ describe("formatEventLine", () => {
   it("formats a stop event", () => {
     const line = formatEventLine({ ts: "2026-04-05T14:45:00Z", type: "stop" })
     expect(line).toContain("Turn completed")
+  })
+
+  it("formats a stop event with stats text", () => {
+    const line = formatEventLine({
+      ts: "2026-04-05T14:45:00Z",
+      type: "stop",
+      text: "2m 15s · 8 turns · 23 tools",
+    })
+    expect(line).toContain("Turn completed")
+    expect(line).toContain("2m 15s · 8 turns · 23 tools")
+  })
+})
+
+describe("formatStopText", () => {
+  it("formats all fields", () => {
+    const text = formatStopText({
+      durationMs: 135_000,
+      turns: 8,
+      totalToolCalls: 23,
+      mcpServerCount: 2,
+      skillCount: 1,
+    })
+    expect(text).toBe("2m 15s · 8 turns · 23 tools · 2 MCPs · 1 skills")
+  })
+
+  it("omits zero values", () => {
+    const text = formatStopText({
+      durationMs: 60_000,
+      turns: 3,
+      totalToolCalls: 5,
+      mcpServerCount: 0,
+      skillCount: 0,
+    })
+    expect(text).toBe("1m · 3 turns · 5 tools")
+  })
+
+  it("omits undefined values", () => {
+    const text = formatStopText({ durationMs: 45_000, turns: 2 })
+    expect(text).toBe("45s · 2 turns")
+  })
+
+  it("returns undefined when all values are zero or undefined", () => {
+    expect(formatStopText({})).toBeUndefined()
+    expect(formatStopText({ durationMs: 0, turns: 0 })).toBeUndefined()
+  })
+
+  it("handles duration-only", () => {
+    expect(formatStopText({ durationMs: 5000 })).toBe("5s")
   })
 })
 

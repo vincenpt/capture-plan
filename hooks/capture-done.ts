@@ -23,6 +23,7 @@ import {
   formatModelLabel,
   formatModelYaml,
   formatSessionYaml,
+  formatStopText,
   formatTagsYaml,
   formatToolsLogContent,
   formatToolsNoteContent,
@@ -422,8 +423,8 @@ async function main(): Promise<void> {
     // Load config early — needed for vault-based state lookup
     const config = await loadConfig(payload.cwd)
 
-    // Buffer a stop event and collect all pending events for flush
-    appendEvent(sessionId, { ts: new Date().toISOString(), type: "stop" })
+    // Capture stop timestamp — the actual stop event is appended later with optional stats
+    const stopTs = new Date().toISOString()
 
     const mainHint = readContextHintFull(sessionId)
     const stopProject = getProjectName(payload.cwd)
@@ -436,9 +437,10 @@ async function main(): Promise<void> {
       vault: config.vault,
     })
 
-    /** Flush buffered session events to the vault doc. Called on all exit paths. */
+    /** Append a plain stop event and flush buffered session events to the vault doc. Called on early-exit paths (the happy path builds an enriched stop event separately). */
     const flushEvents = (): void => {
       if (!(config.session.enabled ?? false)) return
+      appendEvent(sessionId, { ts: stopTs, type: "stop" })
       const events = readAndClearEvents(sessionId)
       if (events.length === 0) return
       upsertSessionDoc({
@@ -735,24 +737,24 @@ ${fileList}
       process.exit(0)
     }
 
-    // Create per-skill activity notes for mixed sessions (plan + skills)
-    if (state.source !== "skill") {
-      // For non-skill sessions (plan-mode, superpowers), check if skills were also used
-      const skillInvocations = findSkillInvocations(entries)
-      if (skillInvocations.length > 0) {
-        debugLog(
-          `Mixed session: ${skillInvocations.length} skill(s) detected alongside ${state.source}\n`,
-          DEBUG_LOG,
-        )
+    // Detect skill invocations once — reused for mixed-session notes and stop stats
+    const skillInvocations = findSkillInvocations(entries)
 
-        const skillCounts = new Map<string, number>()
-        for (const inv of skillInvocations) {
-          const count = skillCounts.get(inv.skill) ?? 0
-          skillCounts.set(inv.skill, count + 1)
-          const suffix = count > 0 ? `-${count + 1}` : ""
-          const skillNotePath = `${state.plan_dir}/${inv.skill}${suffix}`
-          const contextText = [inv.contextBefore, inv.contextAfter].filter(Boolean).join("\n\n")
-          const skillNoteContent = `---
+    // Create per-skill activity notes for mixed sessions (plan + skills)
+    if (state.source !== "skill" && skillInvocations.length > 0) {
+      debugLog(
+        `Mixed session: ${skillInvocations.length} skill(s) detected alongside ${state.source}\n`,
+        DEBUG_LOG,
+      )
+
+      const skillCounts = new Map<string, number>()
+      for (const inv of skillInvocations) {
+        const count = skillCounts.get(inv.skill) ?? 0
+        skillCounts.set(inv.skill, count + 1)
+        const suffix = count > 0 ? `-${count + 1}` : ""
+        const skillNotePath = `${state.plan_dir}/${inv.skill}${suffix}`
+        const contextText = [inv.contextBefore, inv.contextAfter].filter(Boolean).join("\n\n")
+        const skillNoteContent = `---
 created: "[[${journalPath}|${datetime}]]"
 plan: "[[${state.plan_dir}/plan|${state.plan_title.replace(/"/g, '\\"')}]]"
 source: skill
@@ -762,15 +764,14 @@ skill: ${inv.skill}
 
 ${contextText || "_No context captured_"}
 `
-          const skillResult = createVaultNote(skillNotePath, skillNoteContent, config.vault)
-          if (!skillResult.success) {
-            debugLog(
-              `Failed to create skill note: ${skillNotePath} stdout=${skillResult.stdout} stderr=${skillResult.stderr}\n`,
-              DEBUG_LOG,
-            )
-          } else {
-            debugLog(`Skill note captured -> ${skillNotePath}.md\n`, DEBUG_LOG)
-          }
+        const skillResult = createVaultNote(skillNotePath, skillNoteContent, config.vault)
+        if (!skillResult.success) {
+          debugLog(
+            `Failed to create skill note: ${skillNotePath} stdout=${skillResult.stdout} stderr=${skillResult.stderr}\n`,
+            DEBUG_LOG,
+          )
+        } else {
+          debugLog(`Skill note captured -> ${skillNotePath}.md\n`, DEBUG_LOG)
         }
       }
     }
@@ -873,6 +874,24 @@ ${contextText || "_No context captured_"}
       { date: state.date_key, day: getDayName(), project, tags: newTags },
       config.vault,
     )
+
+    // Build enriched stop event with execution stats
+    let turnCount = 0
+    for (let i = boundaryIdx; i < entries.length; i++) {
+      if (entries[i].type === "assistant" && !entries[i].isSidechain) turnCount++
+    }
+    const stopText = formatStopText({
+      durationMs: transcriptStats?.durationMs,
+      turns: turnCount,
+      totalToolCalls: transcriptStats?.totalToolCalls,
+      mcpServerCount: transcriptStats?.mcpServers.length,
+      skillCount: skillInvocations.length,
+    })
+    appendEvent(sessionId, {
+      ts: stopTs,
+      type: "stop",
+      ...(stopText ? { text: stopText } : {}),
+    })
 
     // Create/update session document with all back-links and flush buffered events
     const planNoteName = state.source === "skill" ? "activity" : "plan"

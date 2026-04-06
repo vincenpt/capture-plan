@@ -218,7 +218,10 @@ ${stripTitleLine(planContent)}
       process.exit(0)
     }
 
-    // Record mode exit and flush buffered events
+    // Ensure mode:plan appears before mode:normal in this flush batch.
+    // EnterPlanMode hook (capture-session-event.ts) emits mode:plan and flushes it to the
+    // vault doc, clearing the buffer. Re-emitting here guarantees the transition pair is visible.
+    appendEvent(sessionId, { ts: new Date().toISOString(), type: "mode:plan" })
     appendEvent(sessionId, { ts: new Date().toISOString(), type: "mode:normal" })
     const bufferedEvents = readAndClearEvents(sessionId)
 

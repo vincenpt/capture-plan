@@ -4,6 +4,7 @@
 import { appendFileSync, readFileSync, unlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { formatDuration } from "./dates.ts"
 
 /** A single session event to be logged in the session document. */
 export interface SessionEvent {
@@ -117,6 +118,28 @@ function eventLabel(event: SessionEvent): string {
     case "compact:post":
       return "Context compacted"
   }
+}
+
+/** Options for building a compact stats summary for stop events. */
+export interface StopTextOpts {
+  durationMs?: number
+  turns?: number
+  totalToolCalls?: number
+  mcpServerCount?: number
+  skillCount?: number
+}
+
+/** Format a compact stats summary for the stop event text field. Returns undefined when no meaningful stats are available. */
+export function formatStopText(opts: StopTextOpts): string | undefined {
+  const parts: string[] = []
+  if (opts.durationMs != null && opts.durationMs > 0) parts.push(formatDuration(opts.durationMs))
+  if (opts.turns != null && opts.turns > 0) parts.push(`${opts.turns} turns`)
+  if (opts.totalToolCalls != null && opts.totalToolCalls > 0)
+    parts.push(`${opts.totalToolCalls} tools`)
+  if (opts.mcpServerCount != null && opts.mcpServerCount > 0)
+    parts.push(`${opts.mcpServerCount} MCPs`)
+  if (opts.skillCount != null && opts.skillCount > 0) parts.push(`${opts.skillCount} skills`)
+  return parts.length > 0 ? parts.join(" · ") : undefined
 }
 
 /** Truncate a string to a maximum length, appending "..." if truncated. */
