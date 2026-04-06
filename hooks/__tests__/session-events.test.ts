@@ -161,14 +161,33 @@ describe("formatEventLine", () => {
     expect(line).toContain("Turn completed")
   })
 
-  it("formats a stop event with stats text", () => {
+  it("formats a stop event with stats in parens", () => {
     const line = formatEventLine({
       ts: "2026-04-05T14:45:00Z",
       type: "stop",
       text: "2m 15s · 8 turns · 23 tools",
     })
-    expect(line).toContain("Turn completed")
-    expect(line).toContain("2m 15s · 8 turns · 23 tools")
+    expect(line).toContain("Turn completed (2m 15s · 8 turns · 23 tools)")
+  })
+
+  it("formats a stop event with message as blockquote", () => {
+    const line = formatEventLine({
+      ts: "2026-04-05T14:45:00Z",
+      type: "stop",
+      message: "Committed and pushed as 33a883d.",
+    })
+    expect(line).toContain("Turn completed:")
+    expect(line).toContain("  > Committed and pushed as 33a883d.")
+  })
+
+  it("formats a stop event with stats and message", () => {
+    const line = formatEventLine({
+      ts: "2026-04-05T14:45:00Z",
+      type: "stop",
+      text: "15s · 4 tools",
+      message: "Committed and pushed.",
+    })
+    expect(line).toMatch(/Turn completed \(15s · 4 tools\):\n {2}> Committed and pushed\./)
   })
 })
 

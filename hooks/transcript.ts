@@ -143,6 +143,18 @@ export function parseTranscriptFromString(raw: string): TranscriptEntry[] {
   return entries
 }
 
+/** Find the index of the last human entry that contains a user prompt (text block, not just tool results). Used to identify the start of the current prompt→stop cycle in multi-turn sessions. Returns 0 if no user prompt is found. */
+export function findLastUserPromptIndex(entries: TranscriptEntry[]): number {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]
+    if (entry.type !== "human") continue
+    const content = entry.message?.content
+    if (!Array.isArray(content)) continue
+    if (content.some((b) => b.type === "text" && b.text)) return i
+  }
+  return 0
+}
+
 /** Find the index of the last ExitPlanMode tool_use in the transcript (handles multiple plans). */
 export function findExitPlanIndex(entries: TranscriptEntry[]): number {
   // Find the LAST ExitPlanMode tool_use (in case of multiple plans)

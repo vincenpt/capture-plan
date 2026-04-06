@@ -21,8 +21,10 @@ export interface SessionEvent {
     | "agent:stop"
     | "compact:pre"
     | "compact:post"
-  /** Optional text payload (prompt text, agent description, etc.) */
+  /** Optional text payload (prompt text, agent description, stats summary, etc.) */
   text?: string
+  /** Last assistant message, rendered as blockquote on stop events. */
+  message?: string
 }
 
 /** Build the path to the event buffer JSONL file for a session. */
@@ -88,6 +90,19 @@ export function formatEventLine(event: SessionEvent): string {
       .map((line) => `  > ${line}`)
       .join("\n")
     return `- **${time}** \`${event.type}\` — ${label}:\n${blockquote}`
+  }
+
+  // Stop events: stats in parens, message as blockquote
+  if (event.type === "stop" && (event.text || event.message)) {
+    const stats = event.text ? ` (${event.text})` : ""
+    if (event.message) {
+      const blockquote = event.message
+        .split("\n")
+        .map((line) => `  > ${line}`)
+        .join("\n")
+      return `- **${time}** \`stop\` — ${label}${stats}:\n${blockquote}`
+    }
+    return `- **${time}** \`stop\` — ${label}${stats}`
   }
 
   if (event.text) {

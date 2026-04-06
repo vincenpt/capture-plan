@@ -45,6 +45,7 @@ import {
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
+  truncatePrompt,
   updateJournalFrontmatter,
   upsertSessionDoc,
   writeVaultState,
@@ -56,6 +57,7 @@ import {
   computeDurationMs,
   filterSkillInvocations,
   findExitPlanIndex,
+  findLastUserPromptIndex,
   findSkillInvocations,
   findSuperpowersBoundary,
   findSuperpowersWrites,
@@ -423,8 +425,11 @@ async function main(): Promise<void> {
     // Load config early — needed for vault-based state lookup
     const config = await loadConfig(payload.cwd)
 
-    // Capture stop timestamp — the actual stop event is appended later with optional stats
+    // Capture stop timestamp and last assistant message early — used on all exit paths
     const stopTs = new Date().toISOString()
+    const lastMessage = payload.last_assistant_message
+      ? truncatePrompt(payload.last_assistant_message.trim(), 500)
+      : undefined
 
     const mainHint = readContextHintFull(sessionId)
     const stopProject = getProjectName(payload.cwd)
@@ -437,10 +442,10 @@ async function main(): Promise<void> {
       vault: config.vault,
     })
 
-    /** Append a plain stop event and flush buffered session events to the vault doc. Called on early-exit paths (the happy path builds an enriched stop event separately). */
-    const flushEvents = (): void => {
+    /** Append a stop event and flush buffered session events to the vault doc. Called on early-exit paths (the happy path builds an enriched stop event separately). */
+    const flushEvents = (opts?: { text?: string; message?: string }): void => {
       if (!(config.session.enabled ?? false)) return
-      appendEvent(sessionId, { ts: stopTs, type: "stop" })
+      appendEvent(sessionId, { ts: stopTs, type: "stop", ...opts })
       const events = readAndClearEvents(sessionId)
       if (events.length === 0) return
       upsertSessionDoc({
@@ -472,7 +477,7 @@ async function main(): Promise<void> {
 
       if (!transcriptPath) {
         debugLog("Cannot find transcript, keeping state for retry\n", DEBUG_LOG)
-        flushEvents()
+        flushEvents({ message: lastMessage })
         process.exit(0)
       }
 
@@ -498,13 +503,13 @@ async function main(): Promise<void> {
       if (boundaryIdx === -1) {
         debugLog("No plan boundary found in transcript\n", DEBUG_LOG)
         deleteVaultState(state.plan_dir, config.vault)
-        flushEvents()
+        flushEvents({ message: lastMessage })
         process.exit(0)
       }
     } else {
       // No state — cheap pre-check before full transcript parse (single file read)
       if (!transcriptPath) {
-        flushEvents()
+        flushEvents({ message: lastMessage })
         process.exit(0)
       }
 
@@ -515,7 +520,26 @@ async function main(): Promise<void> {
       const hasSkills = transcriptContainsPatternInString(rawTranscript, ['"Skill"'])
 
       if (!hasSuperpowers && !hasSkills) {
-        flushEvents()
+        // Compute per-cycle stats for the stop event
+        const cycleEntries = parseTranscriptFromString(rawTranscript)
+        const cycleStart = findLastUserPromptIndex(cycleEntries)
+        let cycleTurns = 0
+        for (let i = cycleStart; i < cycleEntries.length; i++) {
+          if (cycleEntries[i].type === "assistant" && !cycleEntries[i].isSidechain) cycleTurns++
+        }
+        let cycleStats: TranscriptStats | null = null
+        try {
+          cycleStats = collectTranscriptStats(cycleEntries, cycleStart)
+        } catch {
+          /* ignore */
+        }
+        const stopText = formatStopText({
+          durationMs: cycleStats?.durationMs,
+          turns: cycleTurns,
+          totalToolCalls: cycleStats?.totalToolCalls,
+          mcpServerCount: cycleStats?.mcpServers.length,
+        })
+        flushEvents({ text: stopText, message: lastMessage })
         process.exit(0)
       }
 
@@ -524,7 +548,7 @@ async function main(): Promise<void> {
       if (hasSuperpowers) {
         const spWrites = findSuperpowersWrites(entries, specPat, planPat)
         if (spWrites.length === 0 && !hasSkills) {
-          flushEvents()
+          flushEvents({ message: lastMessage })
           process.exit(0)
         }
 
@@ -542,7 +566,7 @@ async function main(): Promise<void> {
           )
           if (!result) {
             debugLog("Failed to build superpowers state\n", DEBUG_LOG)
-            flushEvents()
+            flushEvents({ message: lastMessage })
             process.exit(0)
           }
 
@@ -555,7 +579,7 @@ async function main(): Promise<void> {
       if (!state && hasSkills) {
         if (IS_DEV_MODE) {
           debugLog("Dev mode detected, skipping skill-only capture\n", DEBUG_LOG)
-          flushEvents()
+          flushEvents({ message: lastMessage })
           process.exit(0)
         }
 
@@ -564,7 +588,7 @@ async function main(): Promise<void> {
           config.capture_skills,
         )
         if (skillInvocations.length === 0) {
-          flushEvents()
+          flushEvents({ message: lastMessage })
           process.exit(0)
         }
 
@@ -583,7 +607,7 @@ async function main(): Promise<void> {
         )
         if (!result) {
           debugLog("Failed to build skill state\n", DEBUG_LOG)
-          flushEvents()
+          flushEvents({ message: lastMessage })
           process.exit(0)
         }
 
@@ -592,7 +616,7 @@ async function main(): Promise<void> {
       }
 
       if (!state) {
-        flushEvents()
+        flushEvents({ message: lastMessage })
         process.exit(0)
       }
     }
@@ -602,13 +626,13 @@ async function main(): Promise<void> {
       debugLog("No execution tools after plan boundary, waiting for next Stop\n", DEBUG_LOG)
       if (!isSuperpowers) {
         // For plan-mode, keep state for retry. For superpowers, state is ephemeral.
-        flushEvents()
+        flushEvents({ message: lastMessage })
         process.exit(0)
       }
       // Superpowers: still capture the plan note even without execution
       // (state was already created with vault note in buildSuperpowersState)
       deleteVaultState(state.plan_dir, config.vault)
-      flushEvents()
+      flushEvents({ message: lastMessage })
       process.exit(0)
     }
 
@@ -641,7 +665,7 @@ async function main(): Promise<void> {
         `Done text too short (transcript=${stats.allAssistantText.length}, payload=${payloadMessage.length} chars), keeping state for retry\n`,
         DEBUG_LOG,
       )
-      flushEvents()
+      flushEvents({ message: lastMessage })
       process.exit(0) // Keep state — next Stop event can retry
     }
 
@@ -733,7 +757,7 @@ ${fileList}
         DEBUG_LOG,
       )
       deleteVaultState(state.plan_dir, config.vault)
-      flushEvents()
+      flushEvents({ message: lastMessage })
       process.exit(0)
     }
 
@@ -891,6 +915,7 @@ ${contextText || "_No context captured_"}
       ts: stopTs,
       type: "stop",
       ...(stopText ? { text: stopText } : {}),
+      ...(lastMessage ? { message: lastMessage } : {}),
     })
 
     // Create/update session document with all back-links and flush buffered events
