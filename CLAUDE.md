@@ -30,7 +30,7 @@ No build step — Bun runs TypeScript natively.
 
 All vault mutations (create, delete, move, append, property changes) MUST go through the Obsidian CLI (`runObsidian`). Never use `node:fs` write operations (`writeFileSync`, `Bun.write`, `appendFileSync`, `rmSync`, `unlinkSync`, `renameSync`) on vault paths. Direct reads (`readFileSync`, `existsSync`, `readdirSync`, `statSync`, `Bun.file().text()`) are safe — they don't affect the vault index.
 
-To replace an existing vault file without creating numbered duplicates, use the move+create+delete pattern (see `createVaultNote` in `obsidian.ts`): move the old file to a backup path (frees the index entry synchronously), create the new file at the original path, then delete the backup.
+To replace an existing vault file, use `create` with the `overwrite` flag (see `createVaultNote` in `obsidian.ts`). Do not use move+create+delete — the `move` command triggers Obsidian's auto-link-update, corrupting wikilinks across the vault.
 
 ### Obsidian CLI Reference
 

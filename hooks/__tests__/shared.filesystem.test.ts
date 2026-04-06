@@ -437,9 +437,8 @@ describe("appendRevisionToCallout", () => {
     spy.mockRestore()
     expect(result).toBe(true)
 
-    // Verify CLI was called with move (backup) + create
-    expect(calls.some((c) => c.includes("move"))).toBe(true)
-    expect(calls.some((c) => c.includes("create"))).toBe(true)
+    // Verify CLI was called with create + overwrite
+    expect(calls.some((c) => c.includes("create") && c.includes("overwrite"))).toBe(true)
 
     const content = extractCreateContent(calls)
     const lines = content.split("\n")

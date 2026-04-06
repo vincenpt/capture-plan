@@ -191,6 +191,7 @@ async function main(): Promise<void> {
       cachedDocPath: planHint?.session_doc_path,
       project,
       session: config.session,
+      sessionEnabled,
       vault: config.vault,
     })
     const sessionYaml = formatSessionYaml(

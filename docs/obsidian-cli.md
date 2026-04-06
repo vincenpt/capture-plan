@@ -916,21 +916,18 @@ The CLI returns `exitCode=0` even on errors. Errors appear in stdout as `"Error:
 const exitCode = result.exitCode !== 0 || stdout.startsWith("Error:") ? 1 : 0
 ```
 
-### File Replacement Race Condition
+### File Replacement: Use `overwrite` Flag
 
-Using `delete` + `create` to replace a file causes a race condition with the async vault indexer. The indexer hasn't processed the delete before the create arrives, producing numbered duplicates (e.g. `"summary 1.md"`).
-
-**Solution**: Use `move` (frees the index entry synchronously) + `create` + `delete` backup:
-1. Move old file to `*.capture-plan-bak.md` (frees index entry)
-2. Create new file at original path
-3. Delete the backup
+Use `create` with the `overwrite` flag to replace existing vault files:
 
 ```typescript
-// hooks/lib/obsidian.ts:27-59 — createVaultNote()
-runObsidian(["move", `path=${pathWithExt}`, `to=${bakPath}`], vault)
-runObsidian(["create", `path=${path}`, `content=${escaped}`, "silent"], vault)
-runObsidian(["delete", `path=${bakPath}`, "permanent"], vault)
+// hooks/lib/obsidian.ts — createVaultNote()
+runObsidian(["create", `path=${path}`, `content=${escaped}`, "overwrite", "silent"], vault)
 ```
+
+**Why not `delete` + `create`?** Race condition with the async vault indexer — the indexer hasn't processed the delete before the create arrives, producing numbered duplicates (e.g. `"summary 1.md"`).
+
+**Why not `move` + `create` + `delete`?** The `move` command triggers Obsidian's "Auto-update internal links" feature, which rewrites all wikilinks across the vault that reference the moved file. This corrupts frontmatter links (e.g. `created`, `session`) in other notes with the backup filename suffix.
 
 ### Content Escaping
 

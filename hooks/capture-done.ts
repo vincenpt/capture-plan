@@ -426,11 +426,13 @@ async function main(): Promise<void> {
     appendEvent(sessionId, { ts: new Date().toISOString(), type: "stop" })
 
     const mainHint = readContextHintFull(sessionId)
+    const stopProject = getProjectName(payload.cwd)
     const cachedSessionDocPath = ensureSessionRelocated({
       sessionId,
       cachedDocPath: mainHint?.session_doc_path,
-      project: getProjectName(payload.cwd),
+      project: stopProject,
       session: config.session,
+      sessionEnabled: config.session.enabled ?? false,
       vault: config.vault,
     })
 

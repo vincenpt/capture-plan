@@ -368,6 +368,7 @@ export interface EnsureSessionRelocatedOpts {
   cachedDocPath: string | undefined
   project: string | undefined
   session: SessionConfig
+  sessionEnabled: boolean
   vault?: string
 }
 
@@ -377,7 +378,18 @@ export function ensureSessionRelocated(opts: EnsureSessionRelocatedOpts): string
 
   // When no cached path, discover the session doc in the vault
   if (!cachedDocPath) {
-    if (!project) return undefined
+    if (!project) {
+      // No project and no cached path — pre-compute a path if sessions are enabled
+      if (!opts.sessionEnabled) return undefined
+      const path = resolveSessionDocPath(
+        opts.session.path,
+        sessionId,
+        FALLBACK_PROJECT_SLUG,
+        opts.vault,
+      )
+      updateHintPath(sessionId, path)
+      return path
+    }
     const projectSlug = toSlug(project)
     const discovered = findSessionDoc(opts.session.path, sessionId, projectSlug, opts.vault)
     if (discovered) {
@@ -403,7 +415,11 @@ export function ensureSessionRelocated(opts: EnsureSessionRelocatedOpts): string
       updateHintPath(sessionId, resolved)
       return resolved
     }
-    return undefined
+    // No existing doc found — pre-compute a path if sessions are enabled
+    if (!opts.sessionEnabled) return undefined
+    const path = resolveSessionDocPath(opts.session.path, sessionId, projectSlug, opts.vault)
+    updateHintPath(sessionId, path)
+    return path
   }
 
   if (!cachedDocPath.includes(`/${FALLBACK_PROJECT_SLUG}/`)) return cachedDocPath

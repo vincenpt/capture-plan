@@ -160,6 +160,7 @@ function flushToVault(
     cachedDocPath: hint?.session_doc_path,
     project,
     session: config.session,
+    sessionEnabled: config.session.enabled ?? false,
     vault: config.vault,
   })
   if (resolvedPath !== hint?.session_doc_path) {
