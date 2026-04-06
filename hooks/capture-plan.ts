@@ -5,16 +5,19 @@
 import { join } from "node:path"
 import { PLAN_SYSTEM_PROMPT } from "./lib/prompts.ts"
 import {
+  appendEvent,
   appendOrCreateCallout,
   createVaultNote,
   debugLog,
   detectCcVersion,
+  ensureSessionRelocated,
   extractTitle,
   findTranscriptPath,
   formatCcVersionYaml,
   formatJournalRevision,
   formatModelLabel,
   formatModelYaml,
+  formatSessionYaml,
   formatTagsYaml,
   getDateParts,
   getDayName,
@@ -25,14 +28,15 @@ import {
   loadConfig,
   nextCounter,
   padCounter,
-  readCcVersion,
+  readAndClearEvents,
+  readContextHintFull,
   resolveContextCap,
   type SessionState,
-  shortSessionId,
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
   updateJournalFrontmatter,
+  upsertSessionDoc,
   writeVaultState,
 } from "./shared.ts"
 import {
@@ -177,12 +181,28 @@ async function main(): Promise<void> {
 
     const contextCap = resolveContextCap(stats?.peakTurnContext ?? 0, config.context_cap, sessionId)
     const modelYaml = formatModelYaml(stats, contextCap)
-    const ccVersion = detectCcVersion() ?? readCcVersion(sessionId)
+    const planHint = readContextHintFull(sessionId)
+    const ccVersion = detectCcVersion() ?? planHint?.cc_version
     const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
+    const sessionEnabled = config.session.enabled ?? false
+    const resolvedSessionDocPath = ensureSessionRelocated({
+      sessionId,
+      cachedDocPath: planHint?.session_doc_path,
+      project,
+      session: config.session,
+      sessionEnabled,
+      vault: config.vault,
+    })
+    const sessionYaml = formatSessionYaml(
+      sessionId,
+      sessionEnabled,
+      config.session.path,
+      resolvedSessionDocPath,
+    )
+
     const noteContent = `---
-created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}${sessionYaml}${ccVersionYaml}${modelYaml}
 ---
 # ${title}
 
@@ -197,6 +217,25 @@ ${stripTitleLine(planContent)}
       )
       process.exit(0)
     }
+
+    // Ensure mode:plan appears before mode:normal in this flush batch.
+    // EnterPlanMode hook (capture-session-event.ts) emits mode:plan and flushes it to the
+    // vault doc, clearing the buffer. Re-emitting here guarantees the transition pair is visible.
+    appendEvent(sessionId, { ts: new Date().toISOString(), type: "mode:plan" })
+    appendEvent(sessionId, { ts: new Date().toISOString(), type: "mode:normal" })
+    const bufferedEvents = readAndClearEvents(sessionId)
+
+    // Create/update session document if enabled
+    upsertSessionDoc({
+      sessionId,
+      session: config.session,
+      vault: config.vault,
+      project,
+      sessionDocPath: resolvedSessionDocPath,
+      plans: [{ path: planPath, title }],
+      mode: "normal",
+      events: bufferedEvents,
+    })
 
     // Build journal callout revision and append (grouping by title)
     const modelLabel = formatModelLabel(stats?.model, contextCap)

@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
 // capture-session-start.ts — Claude Code SessionStart Hook
-// Detects context window size and writes a hint file for downstream hooks
+// Detects context window size, writes a hint file for downstream hooks,
+// and creates the initial session document in the vault.
 
 import { writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { debugLog, detectCcVersion, loadConfig } from "./shared.ts"
+import { createSessionDoc } from "./lib/session-doc.ts"
+
+import { PLUGIN_ROOT } from "./lib/types.ts"
+import { contextHintPath, debugLog, detectCcVersion, getProjectName, loadConfig } from "./shared.ts"
 
 const DEBUG_LOG = "/tmp/capture-plan-debug.log"
 
@@ -15,17 +17,11 @@ interface SessionStartPayload {
   source?: string
   model?: string
   cwd?: string
+  transcript_path?: string
   [key: string]: unknown
 }
 
-/** Data written to a temp file at session start for downstream hooks to discover context cap and version. */
-export interface ContextHint {
-  session_id: string
-  context_cap?: number
-  model?: string
-  cc_version?: string
-  source: string
-}
+export type { ContextHint } from "./lib/types.ts"
 
 /** Parse context window size from a model identifier like "claude-opus-4-6[1m]". */
 export function parseModelContextCap(model: string): number | undefined {
@@ -38,25 +34,46 @@ export function parseModelContextCap(model: string): number | undefined {
   return undefined
 }
 
-/** Build the temp file path where the context hint is stored for a given session. */
-export function contextHintPath(sessionId: string): string {
-  return join(tmpdir(), `capture-plan-context-${sessionId}.json`)
-}
-
 async function main(): Promise<void> {
+  let sessionEnabled = false
   try {
     const input = await Bun.stdin.text()
-    debugLog(`=== SESSION START ${new Date().toISOString()} ===\n${input}\n---\n`, DEBUG_LOG)
+    const envRoot = process.env.CLAUDE_PLUGIN_ROOT ?? "unset"
+    debugLog(
+      `=== SESSION START ${new Date().toISOString()} ===\nstdin length=${input.length} PLUGIN_ROOT=${PLUGIN_ROOT} CLAUDE_PLUGIN_ROOT=${envRoot}\n`,
+      DEBUG_LOG,
+    )
 
-    const payload: SessionStartPayload = JSON.parse(input)
-    const sessionId = payload.session_id
-    if (!sessionId) return
+    // Try to parse stdin payload (Claude Code may not send one for SessionStart)
+    let payload: SessionStartPayload | undefined
+    if (input.trim()) {
+      try {
+        payload = JSON.parse(input) as SessionStartPayload
+      } catch {
+        debugLog("SessionStart: stdin present but not valid JSON, ignoring\n", DEBUG_LOG)
+      }
+    }
 
-    const config = await loadConfig(payload.cwd)
+    const cwd = payload?.cwd ?? process.cwd()
+    const config = await loadConfig(cwd)
+    debugLog(
+      `SessionStart config: vault=${config.vault ?? "undefined"} session.path=${config.session.path}\n`,
+      DEBUG_LOG,
+    )
+    sessionEnabled = config.session.enabled ?? false
+    debugLog(`SessionStart session.enabled=${sessionEnabled}\n`, DEBUG_LOG)
+
+    // Full bootstrap requires session_id from stdin — if unavailable,
+    // capture-session-event.ts will lazy-init on the first real event.
+    const sessionId = payload?.session_id
+    if (!sessionId) {
+      debugLog("SessionStart: no session_id (empty stdin), deferring bootstrap\n", DEBUG_LOG)
+      return
+    }
 
     // Try to detect context cap from model identifier (e.g., "claude-opus-4-6[1m]")
     let detectedCap: number | undefined
-    if (payload.model) {
+    if (payload?.model) {
       detectedCap = parseModelContextCap(payload.model)
       debugLog(
         `SessionStart model=${payload.model} detectedCap=${detectedCap ?? "none"}\n`,
@@ -73,17 +90,60 @@ async function main(): Promise<void> {
     const hint: ContextHint = {
       session_id: sessionId,
       context_cap: contextCap,
-      model: payload.model,
+      model: payload?.model,
       cc_version: ccVersion,
-      source: payload.source ?? "unknown",
+      source: payload?.source ?? "unknown",
+      session_enabled: sessionEnabled,
+      transcript_path: payload?.transcript_path,
     }
 
     const hintFile = contextHintPath(sessionId)
     writeFileSync(hintFile, JSON.stringify(hint))
     debugLog(`Context hint written: ${hintFile} cap=${contextCap ?? "auto"}\n`, DEBUG_LOG)
+
+    // Create session document in the vault if sessions are enabled
+    if (sessionEnabled) {
+      const now = new Date().toISOString()
+      const project = getProjectName(cwd)
+
+      const sessionDocPath = createSessionDoc({
+        sessionId,
+        session: config.session,
+        vault: config.vault,
+        project,
+        started: now,
+        model: payload?.model,
+        ccVersion: ccVersion,
+      })
+
+      if (sessionDocPath) {
+        hint.session_doc_path = sessionDocPath
+        writeFileSync(hintFile, JSON.stringify(hint))
+        debugLog(`Session doc created at ${sessionDocPath} for ${sessionId}\n`, DEBUG_LOG)
+      }
+
+      // Note: createSessionDoc already embeds the start event in the document body.
+      // No need to buffer a separate start event here.
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     debugLog(`SessionStart error: ${msg}\n`, DEBUG_LOG)
+  } finally {
+    // Always output hookSpecificOutput so CC injects the message into session context.
+    // Other working plugins (superpowers, context-mode) output unconditionally.
+    const status = sessionEnabled ? "ON" : "OFF"
+    const detail = sessionEnabled
+      ? "Session capture is ON — events will be logged to the vault."
+      : "Session capture is OFF."
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "SessionStart",
+          additionalContext: detail,
+        },
+      }),
+    )
+    debugLog(`SessionStart output: status=${status}\n`, DEBUG_LOG)
   }
 }
 

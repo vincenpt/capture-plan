@@ -74,19 +74,19 @@ describe("getDatePartsFor", () => {
 describe("getJournalPathForDate", () => {
   const config = {
     plan: { path: "Claude/Plans", date_scheme: "calendar" as const },
-    journal: { path: "Journal", date_scheme: "calendar" as const },
+    journal: { path: "Claude/Journal", date_scheme: "calendar" as const },
   }
 
   it("builds correct path for a known date", () => {
     // March 29, 2026 is a Sunday
     const date = new Date(2026, 2, 29, 14, 30)
-    expect(getJournalPathForDate(config, date)).toBe("Journal/2026/03-March/29-Sunday")
+    expect(getJournalPathForDate(config, date)).toBe("Claude/Journal/2026/03-March/29-Sunday")
   })
 
   it("builds correct path for January 1", () => {
     // Jan 1, 2026 is a Thursday
     const date = new Date(2026, 0, 1, 12, 0)
-    expect(getJournalPathForDate(config, date)).toBe("Journal/2026/01-January/01-Thursday")
+    expect(getJournalPathForDate(config, date)).toBe("Claude/Journal/2026/01-January/01-Thursday")
   })
 
   it("uses custom journal path from config", () => {
@@ -153,7 +153,7 @@ describe("getPlanDatePath", () => {
   it("combines plan path with formatted date using configured scheme", () => {
     const config = {
       plan: { path: "Claude/Plans", date_scheme: "calendar" as const },
-      journal: { path: "Journal", date_scheme: "calendar" as const },
+      journal: { path: "Claude/Journal", date_scheme: "calendar" as const },
     }
     const parts = getDatePartsFor(new Date(2026, 3, 3, 14, 30))
     expect(getPlanDatePath(config, parts)).toBe("Claude/Plans/2026/04-April/03-Friday")
@@ -162,7 +162,7 @@ describe("getPlanDatePath", () => {
   it("uses compact scheme when configured", () => {
     const config = {
       plan: { path: "Plans", date_scheme: "compact" as const },
-      journal: { path: "Journal", date_scheme: "calendar" as const },
+      journal: { path: "Claude/Journal", date_scheme: "calendar" as const },
     }
     const parts = getDatePartsFor(new Date(2026, 3, 3, 14, 30))
     expect(getPlanDatePath(config, parts)).toBe("Plans/2026/04-03")
@@ -173,19 +173,19 @@ describe("getJournalPathForDate with different schemes", () => {
   it("uses compact scheme for journal", () => {
     const config = {
       plan: { path: "Claude/Plans", date_scheme: "calendar" as const },
-      journal: { path: "Journal", date_scheme: "compact" as const },
+      journal: { path: "Claude/Journal", date_scheme: "compact" as const },
     }
     const date = new Date(2026, 2, 29, 14, 30)
-    expect(getJournalPathForDate(config, date)).toBe("Journal/2026/03-29")
+    expect(getJournalPathForDate(config, date)).toBe("Claude/Journal/2026/03-29")
   })
 
   it("uses flat scheme for journal", () => {
     const config = {
       plan: { path: "Claude/Plans", date_scheme: "calendar" as const },
-      journal: { path: "Journal", date_scheme: "flat" as const },
+      journal: { path: "Claude/Journal", date_scheme: "flat" as const },
     }
     const date = new Date(2026, 2, 29, 14, 30)
-    expect(getJournalPathForDate(config, date)).toBe("Journal/2026-03-29")
+    expect(getJournalPathForDate(config, date)).toBe("Claude/Journal/2026-03-29")
   })
 })
 

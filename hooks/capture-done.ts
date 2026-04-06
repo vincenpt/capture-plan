@@ -7,12 +7,14 @@ import { basename, join } from "node:path"
 import { DONE_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, SKILL_SYSTEM_PROMPT } from "./lib/prompts.ts"
 import { IS_DEV_MODE } from "./lib/types.ts"
 import {
+  appendEvent,
   appendOrCreateCallout,
   type Config,
   createVaultNote,
   debugLog,
   deleteVaultState,
   detectCcVersion,
+  ensureSessionRelocated,
   extractTitle,
   findTranscriptPath,
   formatCcVersionYaml,
@@ -20,6 +22,8 @@ import {
   formatJournalRevision,
   formatModelLabel,
   formatModelYaml,
+  formatSessionYaml,
+  formatStopText,
   formatTagsYaml,
   formatToolsLogContent,
   formatToolsNoteContent,
@@ -33,15 +37,16 @@ import {
   mergeTags,
   nextCounter,
   padCounter,
-  readCcVersion,
+  readAndClearEvents,
+  readContextHintFull,
   resolveContextCap,
   type SessionState,
   scanForVaultState,
-  shortSessionId,
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
   updateJournalFrontmatter,
+  upsertSessionDoc,
   writeVaultState,
 } from "./shared.ts"
 import {
@@ -51,6 +56,7 @@ import {
   computeDurationMs,
   filterSkillInvocations,
   findExitPlanIndex,
+  findLastUserPromptIndex,
   findSkillInvocations,
   findSuperpowersBoundary,
   findSuperpowersWrites,
@@ -83,6 +89,7 @@ async function buildSuperpowersState(
   entries: TranscriptEntry[],
   payload: StopPayload,
   config: Config,
+  sessionDocPath?: string,
 ): Promise<{ state: SessionState; boundaryIdx: number } | null> {
   // Pick primary: prefer plan over spec
   const plans = writes.filter((w) => w.type === "plan")
@@ -126,12 +133,19 @@ async function buildSuperpowersState(
     sessionId,
   )
   const modelYaml = formatModelYaml(planStats, contextCap)
-  const ccVersion = detectCcVersion() ?? readCcVersion(sessionId)
+  const spHint = readContextHintFull(sessionId)
+  const ccVersion = detectCcVersion() ?? spHint?.cc_version
   const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
+  const spSessionYaml = formatSessionYaml(
+    sessionId,
+    config.session.enabled ?? false,
+    config.session.path,
+    sessionDocPath ?? spHint?.session_doc_path,
+  )
+
   const noteContent = `---
-created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}${spSessionYaml}${ccVersionYaml}${modelYaml}
 source: superpowers${primary.filePath ? `\nspec_file: "${primary.filePath}"` : ""}
 ---
 # ${title}
@@ -220,6 +234,7 @@ async function buildSkillState(
   entries: TranscriptEntry[],
   payload: StopPayload,
   config: Config,
+  sessionDocPath?: string,
 ): Promise<{ state: SessionState; boundaryIdx: number } | null> {
   if (invocations.length === 0) return null
 
@@ -274,7 +289,8 @@ async function buildSkillState(
     sessionId,
   )
   const modelYaml = formatModelYaml(planStats, contextCap)
-  const ccVersion = detectCcVersion() ?? readCcVersion(sessionId)
+  const skillHint = readContextHintFull(sessionId)
+  const ccVersion = detectCcVersion() ?? skillHint?.cc_version
   const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
   // Build skills YAML list
@@ -308,9 +324,15 @@ async function buildSkillState(
     .filter(Boolean)
     .join("\n\n---\n\n")
 
+  const skillSessionYaml = formatSessionYaml(
+    sessionId,
+    config.session.enabled ?? false,
+    config.session.path,
+    sessionDocPath ?? skillHint?.session_doc_path,
+  )
+
   const noteContent = `---
-created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}
-session: "[[Sessions/${shortSessionId(sessionId)}]]"${ccVersionYaml}${modelYaml}
+created: "[[${journalPath}|${datetime}]]"${project ? `\nproject: ${project}` : ""}${tagsYaml ? `\ntags:\n${tagsYaml}` : ""}${skillSessionYaml}${ccVersionYaml}${modelYaml}
 source: skill
 skills:
 ${skillsYaml}
@@ -402,6 +424,36 @@ async function main(): Promise<void> {
     // Load config early — needed for vault-based state lookup
     const config = await loadConfig(payload.cwd)
 
+    // Capture stop timestamp and last assistant message early — used on all exit paths
+    const stopTs = new Date().toISOString()
+    const lastMessage = payload.last_assistant_message?.trim() || undefined
+
+    const mainHint = readContextHintFull(sessionId)
+    const stopProject = getProjectName(payload.cwd)
+    const cachedSessionDocPath = ensureSessionRelocated({
+      sessionId,
+      cachedDocPath: mainHint?.session_doc_path,
+      project: stopProject,
+      session: config.session,
+      sessionEnabled: config.session.enabled ?? false,
+      vault: config.vault,
+    })
+
+    /** Append a stop event and flush buffered session events to the vault doc. Called on early-exit paths (the happy path builds an enriched stop event separately). */
+    const flushEvents = (opts?: { text?: string; message?: string }): void => {
+      if (!(config.session.enabled ?? false)) return
+      appendEvent(sessionId, { ts: stopTs, type: "stop", ...opts })
+      const events = readAndClearEvents(sessionId)
+      if (events.length === 0) return
+      upsertSessionDoc({
+        sessionId,
+        session: config.session,
+        vault: config.vault,
+        sessionDocPath: cachedSessionDocPath,
+        events,
+      })
+    }
+
     // Find transcript early — needed for both plan-mode and superpowers paths
     let transcriptPath = payload.transcript_path || null
     if (!transcriptPath) {
@@ -422,6 +474,7 @@ async function main(): Promise<void> {
 
       if (!transcriptPath) {
         debugLog("Cannot find transcript, keeping state for retry\n", DEBUG_LOG)
+        flushEvents({ message: lastMessage })
         process.exit(0)
       }
 
@@ -447,11 +500,15 @@ async function main(): Promise<void> {
       if (boundaryIdx === -1) {
         debugLog("No plan boundary found in transcript\n", DEBUG_LOG)
         deleteVaultState(state.plan_dir, config.vault)
+        flushEvents({ message: lastMessage })
         process.exit(0)
       }
     } else {
       // No state — cheap pre-check before full transcript parse (single file read)
-      if (!transcriptPath) process.exit(0)
+      if (!transcriptPath) {
+        flushEvents({ message: lastMessage })
+        process.exit(0)
+      }
 
       const rawTranscript = readFileSync(transcriptPath, "utf8")
       const specPat = config.superpowers_spec_pattern || "/superpowers/specs/"
@@ -459,21 +516,54 @@ async function main(): Promise<void> {
       const hasSuperpowers = transcriptContainsPatternInString(rawTranscript, [specPat, planPat])
       const hasSkills = transcriptContainsPatternInString(rawTranscript, ['"Skill"'])
 
-      if (!hasSuperpowers && !hasSkills) process.exit(0)
+      if (!hasSuperpowers && !hasSkills) {
+        // Compute per-cycle stats for the stop event
+        const cycleEntries = parseTranscriptFromString(rawTranscript)
+        const cycleStart = findLastUserPromptIndex(cycleEntries)
+        let cycleTurns = 0
+        for (let i = cycleStart; i < cycleEntries.length; i++) {
+          if (cycleEntries[i].type === "assistant" && !cycleEntries[i].isSidechain) cycleTurns++
+        }
+        let cycleStats: TranscriptStats | null = null
+        try {
+          cycleStats = collectTranscriptStats(cycleEntries, cycleStart)
+        } catch {
+          /* ignore */
+        }
+        const stopText = formatStopText({
+          durationMs: cycleStats?.durationMs,
+          turns: cycleTurns,
+          totalToolCalls: cycleStats?.totalToolCalls,
+          mcpServerCount: cycleStats?.mcpServers.length,
+        })
+        flushEvents({ text: stopText, message: lastMessage })
+        process.exit(0)
+      }
 
       entries = parseTranscriptFromString(rawTranscript)
 
       if (hasSuperpowers) {
         const spWrites = findSuperpowersWrites(entries, specPat, planPat)
-        if (spWrites.length === 0 && !hasSkills) process.exit(0)
+        if (spWrites.length === 0 && !hasSkills) {
+          flushEvents({ message: lastMessage })
+          process.exit(0)
+        }
 
         if (spWrites.length > 0) {
           isSuperpowers = true
           debugLog(`Superpowers session detected: ${spWrites.length} spec/plan writes\n`, DEBUG_LOG)
 
-          const result = await buildSuperpowersState(sessionId, spWrites, entries, payload, config)
+          const result = await buildSuperpowersState(
+            sessionId,
+            spWrites,
+            entries,
+            payload,
+            config,
+            cachedSessionDocPath,
+          )
           if (!result) {
             debugLog("Failed to build superpowers state\n", DEBUG_LOG)
+            flushEvents({ message: lastMessage })
             process.exit(0)
           }
 
@@ -486,6 +576,7 @@ async function main(): Promise<void> {
       if (!state && hasSkills) {
         if (IS_DEV_MODE) {
           debugLog("Dev mode detected, skipping skill-only capture\n", DEBUG_LOG)
+          flushEvents({ message: lastMessage })
           process.exit(0)
         }
 
@@ -493,16 +584,27 @@ async function main(): Promise<void> {
           findSkillInvocations(entries),
           config.capture_skills,
         )
-        if (skillInvocations.length === 0) process.exit(0)
+        if (skillInvocations.length === 0) {
+          flushEvents({ message: lastMessage })
+          process.exit(0)
+        }
 
         debugLog(
           `Skill session detected: ${skillInvocations.map((s) => s.skill).join(", ")}\n`,
           DEBUG_LOG,
         )
 
-        const result = await buildSkillState(sessionId, skillInvocations, entries, payload, config)
+        const result = await buildSkillState(
+          sessionId,
+          skillInvocations,
+          entries,
+          payload,
+          config,
+          cachedSessionDocPath,
+        )
         if (!result) {
           debugLog("Failed to build skill state\n", DEBUG_LOG)
+          flushEvents({ message: lastMessage })
           process.exit(0)
         }
 
@@ -510,7 +612,10 @@ async function main(): Promise<void> {
         boundaryIdx = result.boundaryIdx
       }
 
-      if (!state) process.exit(0)
+      if (!state) {
+        flushEvents({ message: lastMessage })
+        process.exit(0)
+      }
     }
 
     // Check for execution activity after the planning boundary
@@ -518,11 +623,13 @@ async function main(): Promise<void> {
       debugLog("No execution tools after plan boundary, waiting for next Stop\n", DEBUG_LOG)
       if (!isSuperpowers) {
         // For plan-mode, keep state for retry. For superpowers, state is ephemeral.
+        flushEvents({ message: lastMessage })
         process.exit(0)
       }
       // Superpowers: still capture the plan note even without execution
       // (state was already created with vault note in buildSuperpowersState)
       deleteVaultState(state.plan_dir, config.vault)
+      flushEvents({ message: lastMessage })
       process.exit(0)
     }
 
@@ -555,6 +662,7 @@ async function main(): Promise<void> {
         `Done text too short (transcript=${stats.allAssistantText.length}, payload=${payloadMessage.length} chars), keeping state for retry\n`,
         DEBUG_LOG,
       )
+      flushEvents({ message: lastMessage })
       process.exit(0) // Keep state — next Stop event can retry
     }
 
@@ -617,7 +725,7 @@ async function main(): Promise<void> {
       sessionId,
     )
     const modelYaml = formatModelYaml(transcriptStats, contextCap)
-    const ccVersion = state.cc_version ?? readCcVersion(sessionId)
+    const ccVersion = state.cc_version ?? mainHint?.cc_version
     const ccVersionYaml = formatCcVersionYaml(ccVersion)
 
     const noteContent = `---
@@ -646,27 +754,28 @@ ${fileList}
         DEBUG_LOG,
       )
       deleteVaultState(state.plan_dir, config.vault)
+      flushEvents({ message: lastMessage })
       process.exit(0)
     }
 
-    // Create per-skill activity notes for mixed sessions (plan + skills)
-    if (state.source !== "skill") {
-      // For non-skill sessions (plan-mode, superpowers), check if skills were also used
-      const skillInvocations = findSkillInvocations(entries)
-      if (skillInvocations.length > 0) {
-        debugLog(
-          `Mixed session: ${skillInvocations.length} skill(s) detected alongside ${state.source}\n`,
-          DEBUG_LOG,
-        )
+    // Detect skill invocations once — reused for mixed-session notes and stop stats
+    const skillInvocations = findSkillInvocations(entries)
 
-        const skillCounts = new Map<string, number>()
-        for (const inv of skillInvocations) {
-          const count = skillCounts.get(inv.skill) ?? 0
-          skillCounts.set(inv.skill, count + 1)
-          const suffix = count > 0 ? `-${count + 1}` : ""
-          const skillNotePath = `${state.plan_dir}/${inv.skill}${suffix}`
-          const contextText = [inv.contextBefore, inv.contextAfter].filter(Boolean).join("\n\n")
-          const skillNoteContent = `---
+    // Create per-skill activity notes for mixed sessions (plan + skills)
+    if (state.source !== "skill" && skillInvocations.length > 0) {
+      debugLog(
+        `Mixed session: ${skillInvocations.length} skill(s) detected alongside ${state.source}\n`,
+        DEBUG_LOG,
+      )
+
+      const skillCounts = new Map<string, number>()
+      for (const inv of skillInvocations) {
+        const count = skillCounts.get(inv.skill) ?? 0
+        skillCounts.set(inv.skill, count + 1)
+        const suffix = count > 0 ? `-${count + 1}` : ""
+        const skillNotePath = `${state.plan_dir}/${inv.skill}${suffix}`
+        const contextText = [inv.contextBefore, inv.contextAfter].filter(Boolean).join("\n\n")
+        const skillNoteContent = `---
 created: "[[${journalPath}|${datetime}]]"
 plan: "[[${state.plan_dir}/plan|${state.plan_title.replace(/"/g, '\\"')}]]"
 source: skill
@@ -676,15 +785,14 @@ skill: ${inv.skill}
 
 ${contextText || "_No context captured_"}
 `
-          const skillResult = createVaultNote(skillNotePath, skillNoteContent, config.vault)
-          if (!skillResult.success) {
-            debugLog(
-              `Failed to create skill note: ${skillNotePath} stdout=${skillResult.stdout} stderr=${skillResult.stderr}\n`,
-              DEBUG_LOG,
-            )
-          } else {
-            debugLog(`Skill note captured -> ${skillNotePath}.md\n`, DEBUG_LOG)
-          }
+        const skillResult = createVaultNote(skillNotePath, skillNoteContent, config.vault)
+        if (!skillResult.success) {
+          debugLog(
+            `Failed to create skill note: ${skillNotePath} stdout=${skillResult.stdout} stderr=${skillResult.stderr}\n`,
+            DEBUG_LOG,
+          )
+        } else {
+          debugLog(`Skill note captured -> ${skillNotePath}.md\n`, DEBUG_LOG)
         }
       }
     }
@@ -787,6 +895,58 @@ ${contextText || "_No context captured_"}
       { date: state.date_key, day: getDayName(), project, tags: newTags },
       config.vault,
     )
+
+    // Build enriched stop event with execution stats
+    let turnCount = 0
+    for (let i = boundaryIdx; i < entries.length; i++) {
+      if (entries[i].type === "assistant" && !entries[i].isSidechain) turnCount++
+    }
+    const stopText = formatStopText({
+      durationMs: transcriptStats?.durationMs,
+      turns: turnCount,
+      totalToolCalls: transcriptStats?.totalToolCalls,
+      mcpServerCount: transcriptStats?.mcpServers.length,
+      skillCount: skillInvocations.length,
+    })
+    appendEvent(sessionId, {
+      ts: stopTs,
+      type: "stop",
+      ...(stopText ? { text: stopText } : {}),
+      ...(lastMessage ? { message: lastMessage } : {}),
+    })
+
+    // Create/update session document with all back-links and flush buffered events
+    const planNoteName = state.source === "skill" ? "activity" : "plan"
+    const pendingEvents = readAndClearEvents(sessionId)
+    upsertSessionDoc({
+      sessionId,
+      session: config.session,
+      vault: config.vault,
+      project,
+      sessionDocPath: cachedSessionDocPath,
+      summaries: [{ path: summaryPath, title: `Done: ${state.plan_title}` }],
+      ...(toolsNoteContent
+        ? {
+            toolsStats: [
+              {
+                path: `${state.plan_dir}/tools-stats`,
+                title: `Session Tools: ${state.plan_title}`,
+              },
+            ],
+          }
+        : {}),
+      ...(toolsLogResult
+        ? {
+            toolsLogs: [
+              { path: `${state.plan_dir}/tools-log`, title: `Tool Log: ${state.plan_title}` },
+            ],
+          }
+        : {}),
+      ...(state.source === "skill"
+        ? { activities: [{ path: `${state.plan_dir}/${planNoteName}`, title: state.plan_title }] }
+        : { plans: [{ path: `${state.plan_dir}/${planNoteName}`, title: state.plan_title }] }),
+      events: pendingEvents,
+    })
 
     // Clean up session state from vault
     deleteVaultState(state.plan_dir, config.vault)

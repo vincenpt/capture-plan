@@ -1,31 +1,96 @@
 // config.ts — Config loading, context hints, version detection, transcript discovery
 
-import { readdirSync, readFileSync } from "node:fs"
+import { readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DATE_SCHEMES, type DateScheme } from "./dates.ts"
 import { filterNoiseTags } from "./text.ts"
-import { type Config, type ContextHintResult, PLUGIN_ROOT } from "./types.ts"
+import {
+  type Config,
+  type ContextHint,
+  type ContextHintResult,
+  PLUGIN_ROOT,
+  type SessionConfig,
+} from "./types.ts"
+
+/** Claude Code session file shape at ~/.claude/sessions/{pid}.json. */
+export interface CcSession {
+  pid: number
+  sessionId: string
+  cwd: string
+  startedAt: number
+  kind?: string
+  entrypoint?: string
+}
+
+/** Find the active Claude Code session for a given CWD by scanning ~/.claude/sessions/. Picks the session with the highest startedAt when multiple match. */
+export function findActiveSession(cwd: string, sessionsDir?: string): CcSession | null {
+  sessionsDir ??= join(homedir(), ".claude", "sessions")
+  let entries: string[]
+  try {
+    entries = readdirSync(sessionsDir)
+  } catch {
+    return null
+  }
+
+  let best: CcSession | null = null
+
+  for (const entry of entries) {
+    if (!entry.endsWith(".json")) continue
+    const fullPath = join(sessionsDir, entry)
+    try {
+      // Only consider files modified within the last 24 hours to skip ancient sessions
+      const mtime = statSync(fullPath).mtimeMs
+      if (Date.now() - mtime > 86_400_000) continue
+
+      const raw = readFileSync(fullPath, "utf8")
+      const parsed = JSON.parse(raw) as CcSession
+      if (parsed.cwd !== cwd) continue
+      if (!best || parsed.startedAt > best.startedAt) {
+        best = parsed
+      }
+    } catch {
+      /* skip unreadable/malformed files */
+    }
+  }
+
+  return best
+}
 
 const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.toml")
 const USER_GLOBAL_CONFIG = join(homedir(), ".config", "capture-plan", "config.toml")
 
 const DEFAULT_PLAN_PATH = "Claude/Plans"
-const DEFAULT_JOURNAL_PATH = "Journal"
+const DEFAULT_JOURNAL_PATH = "Claude/Journal"
+const DEFAULT_SESSION_PATH = "Claude/Sessions"
 const DEFAULT_DATE_SCHEME: DateScheme = "calendar"
+
+/** Default session configuration. */
+const DEFAULT_SESSION_CONFIG: SessionConfig = {
+  path: DEFAULT_SESSION_PATH,
+}
 
 /** Default plugin configuration for reference and testing. */
 export const DEFAULT_CONFIG: Config = {
   plan: { path: DEFAULT_PLAN_PATH, date_scheme: DEFAULT_DATE_SCHEME },
   journal: { path: DEFAULT_JOURNAL_PATH, date_scheme: DEFAULT_DATE_SCHEME },
+  session: DEFAULT_SESSION_CONFIG,
 }
 
-async function loadToml(path: string): Promise<Record<string, unknown> | null> {
+/** Load and parse a TOML file, returning null if the file is missing or unparseable. */
+export async function loadToml(path: string): Promise<Record<string, unknown> | null> {
   try {
     const loaded = await import(path)
     return loaded.default ?? loaded
   } catch {
-    return null
+    // Fallback: import() can fail through symlinks in dev mode.
+    // Read the file directly and parse with Bun's built-in TOML parser.
+    try {
+      const raw = readFileSync(path, "utf8")
+      return Bun.TOML.parse(raw) as Record<string, unknown>
+    } catch {
+      return null
+    }
   }
 }
 
@@ -62,10 +127,29 @@ export async function loadConfig(cwd?: string): Promise<Config> {
     (mergedJournal?.path as string) || (merged.journal_path as string) || DEFAULT_JOURNAL_PATH
   const journalScheme = resolveScheme(mergedJournal?.date_scheme)
 
+  // Resolve session config: deep-merge [session] tables across cascade layers
+  // so a project-local `[session] path = "..."` doesn't clobber a global `enabled = true`
+  const deepSession = {
+    ...(pluginDefault?.session as Record<string, unknown> | undefined),
+    ...(userGlobal?.session as Record<string, unknown> | undefined),
+    ...(project?.session as Record<string, unknown> | undefined),
+  }
+  const sessionPath = (deepSession.path as string) || DEFAULT_SESSION_PATH
+  const rawPromptMax = deepSession.prompt_max_chars
+  const promptMaxChars =
+    typeof rawPromptMax === "number" && rawPromptMax > 0 ? rawPromptMax : undefined
+  const sessionEnabled = deepSession.enabled === true
+  const session: SessionConfig = {
+    path: sessionPath,
+    prompt_max_chars: promptMaxChars,
+    enabled: sessionEnabled,
+  }
+
   return {
     vault: (merged.vault as string) || undefined,
     plan: { path: planPath, date_scheme: planScheme },
     journal: { path: journalPath, date_scheme: journalScheme },
+    session,
     context_cap: contextCap,
     superpowers_spec_pattern: (merged.superpowers_spec_pattern as string) || undefined,
     superpowers_plan_pattern: (merged.superpowers_plan_pattern as string) || undefined,
@@ -148,25 +232,41 @@ export async function summarizeWithClaude(
 
 const DEFAULT_CONTEXT_CAP = 200_000
 
+/** Build the path to the context hint file for a session. */
+export function contextHintPath(sessionId: string): string {
+  return join(tmpdir(), `capture-plan-context-${sessionId}.json`)
+}
+
+/** Read the full context hint written by SessionStart. Returns null if missing or unreadable. */
+export function readContextHintFull(sessionId: string): ContextHint | null {
+  try {
+    const raw = readFileSync(contextHintPath(sessionId), "utf8")
+    return JSON.parse(raw) as ContextHint
+  } catch {
+    return null
+  }
+}
+
 /** Read the context hint file written by SessionStart, returning context cap and CC version. */
 export function readContextHint(sessionId: string): ContextHintResult {
-  try {
-    const hintFile = join(tmpdir(), `capture-plan-context-${sessionId}.json`)
-    const raw = readFileSync(hintFile, "utf8")
-    const hint = JSON.parse(raw) as { context_cap?: number; cc_version?: string }
-    return {
-      context_cap:
-        typeof hint.context_cap === "number" && hint.context_cap > 0 ? hint.context_cap : undefined,
-      cc_version: typeof hint.cc_version === "string" ? hint.cc_version : undefined,
-    }
-  } catch {
-    return {}
+  const hint = readContextHintFull(sessionId)
+  if (!hint) return {}
+  return {
+    context_cap:
+      typeof hint.context_cap === "number" && hint.context_cap > 0 ? hint.context_cap : undefined,
+    cc_version: typeof hint.cc_version === "string" ? hint.cc_version : undefined,
   }
 }
 
 /** Read the Claude Code version string from the session's context hint file. */
 export function readCcVersion(sessionId: string): string | undefined {
   return readContextHint(sessionId).cc_version
+}
+
+/** Read the cached session document vault path from the context hint file. */
+export function readSessionDocPath(sessionId: string): string | undefined {
+  const hint = readContextHintFull(sessionId)
+  return typeof hint?.session_doc_path === "string" ? hint.session_doc_path : undefined
 }
 
 /** Parse Claude Code version from `claude --version` output (e.g. "2.1.89 (Claude Code)"). */
@@ -224,34 +324,16 @@ export function nextCounter(dateDirPath: string): number {
   }
 }
 
-/** Locate the JSONL transcript file for a session, trying the cwd-derived project slug first then scanning all projects. */
+/** Locate the JSONL transcript file for a session using the cwd-derived project slug. */
 export function findTranscriptPath(sessionId: string, cwd?: string): string | null {
+  if (!cwd) return null
   const projectsDir = join(homedir(), ".claude", "projects")
-
-  // Try cwd-derived project slug first
-  if (cwd) {
-    const slug = `-${cwd.replace(/\//g, "-")}`
-    const p = join(projectsDir, slug, `${sessionId}.jsonl`)
-    try {
-      if (Bun.file(p).size > 0) return p
-    } catch {
-      /* */
-    }
-  }
-
-  // Fallback: scan all project directories
+  const slug = `-${cwd.replace(/\//g, "-")}`
+  const p = join(projectsDir, slug, `${sessionId}.jsonl`)
   try {
-    for (const dir of readdirSync(projectsDir)) {
-      const p = join(projectsDir, dir, `${sessionId}.jsonl`)
-      try {
-        if (Bun.file(p).size > 0) return p
-      } catch {
-        /* */
-      }
-    }
+    if (Bun.file(p).size > 0) return p
   } catch {
     /* */
   }
-
   return null
 }

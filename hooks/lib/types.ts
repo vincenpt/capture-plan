@@ -11,11 +11,19 @@ export interface PathConfig {
   date_scheme: DateScheme
 }
 
+/** Configuration for session document capture. */
+export interface SessionConfig {
+  path: string
+  prompt_max_chars?: number
+  enabled?: boolean
+}
+
 /** Plugin configuration loaded from the 3-layer TOML config cascade. */
 export interface Config {
   vault?: string
   plan: PathConfig
   journal: PathConfig
+  session: SessionConfig
   context_cap?: number
   superpowers_spec_pattern?: string
   superpowers_plan_pattern?: string
@@ -61,6 +69,19 @@ export interface ContextHintResult {
   cc_version?: string
 }
 
+/** Data written to a temp file at session start for downstream hooks to discover context cap, version, and session state. */
+export interface ContextHint {
+  session_id: string
+  context_cap?: number
+  model?: string
+  cc_version?: string
+  source: string
+  session_enabled: boolean
+  transcript_path?: string
+  /** Cached vault path for the session document (set after creation). */
+  session_doc_path?: string
+}
+
 /** A subagent prompt to be written as a separate note in the vault. */
 export interface AgentFileEntry {
   path: string // Obsidian vault path (no .md extension)
@@ -75,7 +96,7 @@ export interface ToolsLogResult {
 
 /** Absolute path to the hooks/ directory (derived from the running script). */
 export const HOOKS_DIR = dirname(Bun.main)
-/** Absolute path to the plugin root directory (parent of hooks/). */
-export const PLUGIN_ROOT = dirname(HOOKS_DIR)
+/** Absolute path to the plugin root directory. Prefers CLAUDE_PLUGIN_ROOT env var (set by CC for plugin hooks) over Bun.main derivation to avoid symlink resolution issues. */
+export const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || dirname(HOOKS_DIR)
 /** True when the plugin is running from a symlinked dev repo (has .git dir). */
 export const IS_DEV_MODE: boolean = existsSync(join(PLUGIN_ROOT, ".git"))

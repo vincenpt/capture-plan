@@ -25,32 +25,18 @@ export function runObsidian(
 }
 
 /** Create or replace a note in the vault via the Obsidian CLI.
- *  If the file already exists, moves it to a backup path first to free the index entry,
- *  then creates the new file at the original path and deletes the backup.
- *  Using delete+create directly causes a race condition where the indexer hasn't processed
- *  the delete before the create arrives, producing numbered duplicates (e.g. "summary 1.md"). */
+ *  Uses the `overwrite` flag to atomically replace existing files without
+ *  triggering Obsidian's auto-link-update (which corrupts wikilinks). */
 export function createVaultNote(
   path: string,
   content: string,
   vault?: string,
 ): { success: boolean; exitCode: number; stdout: string; stderr: string } {
-  const pathWithExt = ensureMdExt(path)
-  const needsReplace = vaultFileExists(pathWithExt, vault)
-  const bakPath = pathWithExt.replace(/\.md$/, ".capture-plan-bak.md")
-
-  if (needsReplace) {
-    // Move frees the index entry synchronously (unlike delete)
-    runObsidian(["delete", `path=${bakPath}`, "permanent"], vault)
-    runObsidian(["move", `path=${pathWithExt}`, `to=${bakPath}`], vault)
-  }
-
   const escaped = content.replace(/\n/g, "\\n")
-  const result = runObsidian(["create", `path=${path}`, `content=${escaped}`, "silent"], vault)
-
-  if (needsReplace) {
-    runObsidian(["delete", `path=${bakPath}`, "permanent"], vault)
-  }
-
+  const result = runObsidian(
+    ["create", `path=${path}`, `content=${escaped}`, "overwrite", "silent"],
+    vault,
+  )
   return {
     success: result.exitCode === 0,
     exitCode: result.exitCode,
@@ -144,6 +130,13 @@ export function setVaultProperty(
     ["property:set", `name=${name}`, `value=${value}`, `type=${type}`, `path=${pathWithExt}`],
     vault,
   )
+  return result.exitCode === 0
+}
+
+/** Remove a frontmatter property from a vault note via the Obsidian CLI. Returns true on success. */
+export function removeVaultProperty(pathRel: string, name: string, vault?: string): boolean {
+  const pathWithExt = ensureMdExt(pathRel)
+  const result = runObsidian(["property:remove", `name=${name}`, `path=${pathWithExt}`], vault)
   return result.exitCode === 0
 }
 

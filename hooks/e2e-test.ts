@@ -14,8 +14,8 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { contextHintPath } from "./capture-session-start.ts"
 import {
+  contextHintPath,
   createVaultNote,
   ensureMdExt,
   getDateParts,

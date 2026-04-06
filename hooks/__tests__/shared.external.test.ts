@@ -135,6 +135,7 @@ describe("createVaultNote", () => {
         "create",
         "path=path/to/note",
         "content=line1\\nline2\\nline3",
+        "overwrite",
         "silent",
       ],
       { stdout: "pipe", stderr: "pipe" },

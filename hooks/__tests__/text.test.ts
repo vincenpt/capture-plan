@@ -10,6 +10,7 @@ import {
   formatJournalRevision,
   formatModelLabel,
   formatNumber,
+  formatSessionYaml,
   formatTagsYaml,
   getDayName,
   getProjectName,
@@ -17,6 +18,7 @@ import {
   langFromPath,
   mergeTags,
   padCounter,
+  sessionDocPath,
   shortSessionId,
   stripTitleLine,
   toSlug,
@@ -295,6 +297,49 @@ describe("shortSessionId", () => {
 
   it("returns full string if shorter than 8", () => {
     expect(shortSessionId("abc")).toBe("abc")
+  })
+})
+
+describe("sessionDocPath", () => {
+  it("builds project-based path with first UUID segment", () => {
+    expect(
+      sessionDocPath("Claude/Sessions", "3a76e3ac-3e0b-44c4-8962-b02716a8138b", "capture-plan"),
+    ).toBe("Claude/Sessions/capture-plan/3a76e3ac")
+  })
+
+  it("works with custom path", () => {
+    expect(sessionDocPath("My/Sessions", "abcdef1234", "my-project")).toBe(
+      "My/Sessions/my-project/abcdef1234",
+    )
+  })
+
+  it("falls back to no-project when project is empty", () => {
+    expect(sessionDocPath("Claude/Sessions", "3a76e3ac-3e0b-44c4-8962-b02716a8138b", "")).toBe(
+      "Claude/Sessions/no-project/3a76e3ac",
+    )
+  })
+})
+
+describe("formatSessionYaml", () => {
+  it("returns empty string when disabled", () => {
+    expect(
+      formatSessionYaml("3a76e3ac-3e0b-44c4-8962-b02716a8138b", false, "Claude/Sessions"),
+    ).toBe("")
+  })
+
+  it("returns session YAML line with override path", () => {
+    const result = formatSessionYaml(
+      "3a76e3ac-3e0b-44c4-8962-b02716a8138b",
+      true,
+      "Claude/Sessions",
+      "Claude/Sessions/capture-plan/001-3a76e3ac",
+    )
+    expect(result).toBe('\nsession: "[[Claude/Sessions/capture-plan/001-3a76e3ac|3a76e3ac]]"')
+  })
+
+  it("falls back to computed path when no override", () => {
+    const result = formatSessionYaml("abcdef1234", true, "My/Path")
+    expect(result).toBe('\nsession: "[[My/Path/no-project/abcdef1234|abcdef12]]"')
   })
 })
 
