@@ -4,7 +4,7 @@ import type { TranscriptStats } from "../transcript.ts"
 import { formatDatePath, getDatePartsFor } from "./dates.ts"
 import { createVaultNote, listVaultFolders, readVaultNote, runObsidian } from "./obsidian.ts"
 import { ensureMdExt } from "./text.ts"
-import type { Config, PlanFrontmatter, SessionState } from "./types.ts"
+import type { Config, ContextHint, PlanFrontmatter, SessionState } from "./types.ts"
 
 const STALE_STATE_MS = 2 * 60 * 60 * 1000 // 2 hours
 
@@ -96,6 +96,29 @@ export function writeVaultState(state: SessionState, vault?: string): boolean {
   }
   lines.push("---")
   return createVaultNote(`${state.plan_dir}/state`, lines.join("\n"), vault).success
+}
+
+/**
+ * Resolve the pending SessionState for a Stop hook.
+ *
+ * Prefers the `plan_dir` hint written by capture-plan (single CLI read) and falls back
+ * to a full vault scan when the hint is absent (pre-hint sessions, or sessions with no
+ * captured plan). Returns null when no uncompleted state belonging to this session
+ * exists in the vault.
+ */
+export function resolveVaultState(
+  sessionId: string,
+  mainHint: ContextHint | null | undefined,
+  config: Config,
+): SessionState | null {
+  if (mainHint?.plan_dir) {
+    const stateText = readVaultNote(`${mainHint.plan_dir}/state`, config.vault)
+    if (!stateText) return null
+    const parsed = parseStateFromFrontmatter(stateText)
+    if (!parsed || parsed.completed || parsed.session_id !== sessionId) return null
+    return parsed
+  }
+  return scanForVaultState(sessionId, config)
 }
 
 /** Scan today's and yesterday's plan directories for a matching session state file. */

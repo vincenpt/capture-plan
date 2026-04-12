@@ -37,13 +37,11 @@ import {
   mergeTags,
   nextCounter,
   padCounter,
-  parseStateFromFrontmatter,
   readAndClearEvents,
   readContextHintFull,
-  readVaultNote,
   resolveContextCap,
+  resolveVaultState,
   type SessionState,
-  scanForVaultState,
   stripTitleLine,
   summarizeWithClaude,
   toSlug,
@@ -473,20 +471,7 @@ async function main(): Promise<void> {
     const vaultPath = getVaultPath(config.vault)
 
     // Gate: look up pending session state via hint (fast path) or vault scan (fallback)
-    let state: SessionState | null = null
-    if (mainHint?.plan_dir) {
-      // Fast path: hint records the plan_dir written by capture-plan — single CLI read
-      const stateText = readVaultNote(`${mainHint.plan_dir}/state`, config.vault)
-      if (stateText) {
-        const parsed = parseStateFromFrontmatter(stateText)
-        if (parsed && !parsed.completed && parsed.session_id === sessionId) {
-          state = parsed
-        }
-      }
-    } else {
-      // Fallback: full vault scan (handles sessions started before hint-based tracking)
-      state = scanForVaultState(sessionId, config)
-    }
+    let state: SessionState | null = resolveVaultState(sessionId, mainHint, config)
     let boundaryIdx = -1
     let entries: TranscriptEntry[] = []
     let isSuperpowers = false
