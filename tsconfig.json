@@ -10,5 +10,5 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": false
   },
-  "include": ["hooks/**/*.ts"]
+  "include": ["hooks/**/*.ts", "scripts/**/*.ts"]
 }

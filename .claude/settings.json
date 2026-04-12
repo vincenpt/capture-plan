@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(bun scripts/dev-mode.ts *)"
+    ]
+  },
   "enabledPlugins": {
     "vtsls@claude-code-lsps": true
   }
