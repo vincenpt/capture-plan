@@ -6,11 +6,24 @@ description: "Use when the user wants to release a new version of the capture-pl
 
 Automate version bumping and GitHub release creation for the capture-plan plugin.
 
+This command always operates on `main`. If invoked from another branch, it will stash local changes and switch to main before releasing.
+
 ## Arguments
 
 The user provides a bump type as an argument: `major`, `minor`, or `patch`. Default to `patch` if not specified.
 
 ## Procedure
+
+### 0. Ensure on up-to-date main
+
+Releases MUST originate from main. Before anything else:
+
+1. Run `git status --porcelain`. If there are uncommitted or untracked changes, run `git stash push -u -m "pre-release auto-stash"` and REPORT to the user which files were stashed plus the stash ref. Tell them to `git stash pop` after the release if they want those changes back.
+2. Capture the starting branch name (`git branch --show-current`).
+3. If the current branch is not `main`, run `git switch main`.
+4. `git fetch origin main`.
+5. If local `main` is behind `origin/main`, run `git pull --ff-only origin main`. If a fast-forward is not possible (diverged main), STOP and report to the user — do not attempt to merge or rebase.
+6. Proceed with the rest of the release procedure from main.
 
 ### 1. Determine new version
 
