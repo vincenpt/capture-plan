@@ -1,10 +1,10 @@
 // config.ts — Config loading, context hints, version detection, transcript discovery
 
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DATE_SCHEMES, type DateScheme } from "./dates.ts"
-import { filterNoiseTags } from "./text.ts"
+import { debugLog, filterNoiseTags } from "./text.ts"
 import {
   type Config,
   type ContextHint,
@@ -267,6 +267,29 @@ export function readCcVersion(sessionId: string): string | undefined {
 export function readSessionDocPath(sessionId: string): string | undefined {
   const hint = readContextHintFull(sessionId)
   return typeof hint?.session_doc_path === "string" ? hint.session_doc_path : undefined
+}
+
+const CONFIG_DEBUG_LOG = "/tmp/capture-config-debug.log"
+
+/**
+ * Merge partial updates into the context hint file. Only overwrites supplied keys;
+ * other fields are preserved. When the hint file is missing (SessionStart ran
+ * without a stdin payload and no lazy bootstrap has fired yet), the patch is
+ * silently dropped — a debug line is logged so the failure mode is observable.
+ */
+export function updateContextHint(
+  sessionId: string,
+  patch: Partial<Pick<ContextHint, "plan_dir" | "session_doc_path">>,
+): void {
+  const hint = readContextHintFull(sessionId)
+  if (!hint) {
+    debugLog(
+      `updateContextHint: no hint file for session ${sessionId}; patch ${JSON.stringify(patch)} dropped\n`,
+      CONFIG_DEBUG_LOG,
+    )
+    return
+  }
+  writeFileSync(contextHintPath(sessionId), JSON.stringify({ ...hint, ...patch }))
 }
 
 /** Parse Claude Code version from `claude --version` output (e.g. "2.1.89 (Claude Code)"). */

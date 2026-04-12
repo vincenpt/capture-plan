@@ -80,6 +80,8 @@ export interface ContextHint {
   transcript_path?: string
   /** Cached vault path for the session document (set after creation). */
   session_doc_path?: string
+  /** Vault-relative plan directory path (set by capture-plan when state is written, cleared by capture-done after consumption). */
+  plan_dir?: string
 }
 
 /** A subagent prompt to be written as a separate note in the vault. */
