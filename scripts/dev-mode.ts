@@ -7,7 +7,7 @@
  * Usage: bun scripts/dev-mode.ts <start|stop>
  */
 
-import { existsSync, lstatSync, renameSync, rmSync, symlinkSync } from "node:fs"
+import { existsSync, lstatSync, renameSync, rmdirSync, rmSync, symlinkSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -33,6 +33,7 @@ const cachePath = join(home, ".claude", "plugins", "cache", owner, name, version
 const cacheBackup = `${cachePath}.bak`
 const marketPath = join(home, ".claude", "plugins", "marketplaces", owner)
 const marketBackup = `${marketPath}.bak`
+const symlinkType = process.platform === "win32" ? "junction" : undefined
 
 function isSymlink(p: string): boolean {
   try {
@@ -67,7 +68,7 @@ function start(): void {
       process.exit(1)
     }
     renameSync(cachePath, cacheBackup)
-    symlinkSync(repoRoot, cachePath)
+    symlinkSync(repoRoot, cachePath, symlinkType)
     console.log(`Symlinked cache: ${cachePath} → ${repoRoot}`)
   } else {
     console.log("Cache already symlinked, skipping.")
@@ -81,7 +82,7 @@ function start(): void {
       process.exit(1)
     }
     renameSync(marketPath, marketBackup)
-    symlinkSync(repoRoot, marketPath)
+    symlinkSync(repoRoot, marketPath, symlinkType)
     console.log(`Symlinked marketplace: ${marketPath} → ${repoRoot}`)
   } else {
     console.log("Marketplace already symlinked, skipping.")
@@ -102,7 +103,8 @@ function stop(): void {
   }
 
   if (cacheLinked) {
-    rmSync(cachePath)
+    if (symlinkType) rmdirSync(cachePath)
+    else rmSync(cachePath)
     if (existsSync(cacheBackup)) {
       renameSync(cacheBackup, cachePath)
       console.log(`Restored cache from backup: ${cachePath}`)
@@ -113,7 +115,8 @@ function stop(): void {
   }
 
   if (marketLinked) {
-    rmSync(marketPath)
+    if (symlinkType) rmdirSync(marketPath)
+    else rmSync(marketPath)
     if (existsSync(marketBackup)) {
       renameSync(marketBackup, marketPath)
       console.log(`Restored marketplace from backup: ${marketPath}`)

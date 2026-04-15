@@ -123,7 +123,7 @@ describe("createVaultNote", () => {
     spawnSyncSpy?.mockRestore()
   })
 
-  it("escapes newlines and calls runObsidian create with silent", () => {
+  it("preserves newlines in content and calls runObsidian create with silent", () => {
     spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({ stdout: "ok" }))
 
     const result = createVaultNote("path/to/note", "line1\nline2\nline3", "MyVault")
@@ -134,7 +134,7 @@ describe("createVaultNote", () => {
         "vault=MyVault",
         "create",
         "path=path/to/note",
-        "content=line1\\nline2\\nline3",
+        "content=line1\nline2\nline3",
         "overwrite",
         "silent",
       ],
