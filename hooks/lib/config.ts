@@ -59,12 +59,8 @@ export function findActiveSession(cwd: string, sessionsDir?: string): CcSession 
 
 const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.toml")
 
-/** Platform-aware user-global config path: %APPDATA% on Windows, ~/.config on other platforms. */
+/** User-global config path: ~/.config/capture-plan/config.toml on all platforms. */
 export function userGlobalConfigPath(): string {
-  if (process.platform === "win32") {
-    const appData = process.env.APPDATA ?? join(homedir(), "AppData", "Roaming")
-    return join(appData, "capture-plan", "config.toml")
-  }
   return join(homedir(), ".config", "capture-plan", "config.toml")
 }
 

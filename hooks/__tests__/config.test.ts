@@ -1,53 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
+import { describe, expect, it } from "bun:test"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { findTranscriptPath, userGlobalConfigPath } from "../lib/config.ts"
 
 describe("userGlobalConfigPath", () => {
-  let originalPlatform: string
-  let originalAppData: string | undefined
-
-  beforeEach(() => {
-    originalPlatform = process.platform
-    originalAppData = process.env.APPDATA
-  })
-
-  afterEach(() => {
-    Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true })
-    if (originalAppData) {
-      process.env.APPDATA = originalAppData
-    } else {
-      delete process.env.APPDATA
-    }
-  })
-
-  it("returns Windows APPDATA path when process.platform is win32", () => {
-    Object.defineProperty(process, "platform", { value: "win32", configurable: true })
-    process.env.APPDATA = "C:\\Users\\testuser\\AppData\\Roaming"
-
-    const path = userGlobalConfigPath()
-    expect(path).toBe(join("C:\\Users\\testuser\\AppData\\Roaming", "capture-plan", "config.toml"))
-  })
-
-  it("uses home AppData Roaming fallback when APPDATA env var is not set on Windows", () => {
-    Object.defineProperty(process, "platform", { value: "win32", configurable: true })
-    delete process.env.APPDATA
-
-    const path = userGlobalConfigPath()
-    const expected = join(homedir(), "AppData", "Roaming", "capture-plan", "config.toml")
-    expect(path).toBe(expected)
-  })
-
-  it("returns Unix .config path on non-Windows platforms", () => {
-    Object.defineProperty(process, "platform", { value: "linux", configurable: true })
-
-    const path = userGlobalConfigPath()
-    expect(path).toBe(join(homedir(), ".config", "capture-plan", "config.toml"))
-  })
-
-  it("returns Unix .config path on macOS", () => {
-    Object.defineProperty(process, "platform", { value: "darwin", configurable: true })
-
+  it("returns ~/.config/capture-plan/config.toml on all platforms", () => {
     const path = userGlobalConfigPath()
     expect(path).toBe(join(homedir(), ".config", "capture-plan", "config.toml"))
   })
