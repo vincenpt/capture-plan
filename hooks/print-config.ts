@@ -1,26 +1,10 @@
 #!/usr/bin/env bun
 // print-config.ts — Print full plugin configuration with per-option provenance
 
-import { homedir, platform } from "node:os"
 import { join } from "node:path"
+import { getUserConfigDir } from "./lib/config.ts"
 import { PLUGIN_ROOT } from "./lib/types.ts"
 import { loadToml } from "./shared.ts"
-
-/** Get platform-specific user config directory path. */
-function getUserConfigDir(): string {
-  const home = homedir()
-  if (platform() === "win32") {
-    // Windows: %LOCALAPPDATA%/capture-plan
-    const localAppData = process.env.LOCALAPPDATA
-    if (localAppData) {
-      return join(localAppData, "capture-plan")
-    }
-    // Fallback: AppData\Local\capture-plan
-    return join(home, "AppData", "Local", "capture-plan")
-  }
-  // macOS/Linux: ~/.config/capture-plan
-  return join(home, ".config", "capture-plan")
-}
 
 type Layer = Record<string, unknown> | null
 

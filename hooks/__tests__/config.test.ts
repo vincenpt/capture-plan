@@ -1,12 +1,36 @@
 import { describe, expect, it } from "bun:test"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
-import { findTranscriptPath, userGlobalConfigPath } from "../lib/config.ts"
+import { findTranscriptPath, getUserConfigDir, userGlobalConfigPath } from "../lib/config.ts"
+
+describe("getUserConfigDir", () => {
+  it("returns LOCALAPPDATA path on win32 when LOCALAPPDATA is set", () => {
+    const originalEnv = process.env.LOCALAPPDATA
+    process.env.LOCALAPPDATA = "C:\\Users\\testuser\\AppData\\Local"
+    const result = getUserConfigDir("win32")
+    if (originalEnv === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = originalEnv
+    expect(result).toBe(join("C:\\Users\\testuser\\AppData\\Local", "capture-plan"))
+  })
+
+  it("returns AppData\\Local fallback on win32 when LOCALAPPDATA is unset", () => {
+    const originalEnv = process.env.LOCALAPPDATA
+    delete process.env.LOCALAPPDATA
+    const result = getUserConfigDir("win32")
+    if (originalEnv !== undefined) process.env.LOCALAPPDATA = originalEnv
+    expect(result).toBe(join(homedir(), "AppData", "Local", "capture-plan"))
+  })
+
+  it("returns ~/.config/capture-plan on non-Windows", () => {
+    const result = getUserConfigDir("linux")
+    expect(result).toBe(join(homedir(), ".config", "capture-plan"))
+  })
+})
 
 describe("userGlobalConfigPath", () => {
-  it("returns ~/.config/capture-plan/config.toml on all platforms", () => {
-    const path = userGlobalConfigPath()
-    expect(path).toBe(join(homedir(), ".config", "capture-plan", "config.toml"))
+  it("appends config.toml to getUserConfigDir()", () => {
+    const configDir = getUserConfigDir()
+    expect(userGlobalConfigPath()).toBe(join(configDir, "config.toml"))
   })
 })
 
