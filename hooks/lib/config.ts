@@ -58,7 +58,17 @@ export function findActiveSession(cwd: string, sessionsDir?: string): CcSession 
 }
 
 const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.toml")
-const USER_GLOBAL_CONFIG = join(homedir(), ".config", "capture-plan", "config.toml")
+
+/** Platform-aware user-global config path: %APPDATA% on Windows, ~/.config on other platforms. */
+export function userGlobalConfigPath(): string {
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA ?? join(homedir(), "AppData", "Roaming")
+    return join(appData, "capture-plan", "config.toml")
+  }
+  return join(homedir(), ".config", "capture-plan", "config.toml")
+}
+
+const USER_GLOBAL_CONFIG = userGlobalConfigPath()
 
 const DEFAULT_PLAN_PATH = "Claude/Plans"
 const DEFAULT_JOURNAL_PATH = "Claude/Journal"
@@ -269,7 +279,7 @@ export function readSessionDocPath(sessionId: string): string | undefined {
   return typeof hint?.session_doc_path === "string" ? hint.session_doc_path : undefined
 }
 
-const CONFIG_DEBUG_LOG = "/tmp/capture-config-debug.log"
+const CONFIG_DEBUG_LOG = join(tmpdir(), "capture-config-debug.log")
 
 /**
  * Merge partial updates into the context hint file. Only overwrites supplied keys;
@@ -351,7 +361,8 @@ export function nextCounter(dateDirPath: string): number {
 export function findTranscriptPath(sessionId: string, cwd?: string): string | null {
   if (!cwd) return null
   const projectsDir = join(homedir(), ".claude", "projects")
-  const slug = `-${cwd.replace(/\//g, "-")}`
+  // Replace both / and \ with -, then remove any remaining : (Windows drive letter)
+  const slug = `-${cwd.replace(/[/\\]/g, "-").replace(/:/g, "")}`
   const p = join(projectsDir, slug, `${sessionId}.jsonl`)
   try {
     if (Bun.file(p).size > 0) return p
