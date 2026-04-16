@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // print-session.ts — Print current session stats as JSON for the /session-print skill
 
-import { findActiveSession, findTranscriptPath } from "./lib/config.ts"
+import { findActiveSession, findTranscriptPath, loadConfig } from "./lib/config.ts"
 import { formatDuration } from "./lib/dates.ts"
 import { readEvents } from "./lib/session-events.ts"
 import { getProjectName, shortSessionId } from "./lib/text.ts"
@@ -100,6 +100,8 @@ function emitError(error: string): never {
 const cwd = process.env.CLAUDE_CWD
 if (!cwd) emitError("CLAUDE_CWD not set")
 
+const config = await loadConfig(cwd)
+
 // Primary: discover session from CC's canonical session files
 const ccSession = findActiveSession(cwd)
 if (!ccSession) emitError("No active CC session found for this CWD")
@@ -165,7 +167,7 @@ if (durationMs === 0 && ccSession.startedAt) {
   durationMs = Date.now() - ccSession.startedAt
 }
 
-const project = cwd ? getProjectName(cwd) : ""
+const project = cwd ? getProjectName(cwd, config.project_name) : ""
 
 const output: SessionPrintOutput = {
   session: {

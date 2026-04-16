@@ -62,7 +62,7 @@ async function main(): Promise<void> {
 
       if (enabled) {
         const now = new Date().toISOString()
-        const project = getProjectName(payload.cwd ?? process.cwd())
+        const project = getProjectName(payload.cwd ?? process.cwd(), config.project_name)
         const sessionDocPath = createSessionDoc({
           sessionId,
           session: config.session,
@@ -156,7 +156,7 @@ function flushToVault(
   if (events.length === 0 && !mode) return
 
   const hint = readContextHintFull(sessionId)
-  const project = getProjectName(cwd ?? process.cwd())
+  const project = getProjectName(cwd ?? process.cwd(), config.project_name)
   const resolvedPath = ensureSessionRelocated({
     sessionId,
     cachedDocPath: hint?.session_doc_path,

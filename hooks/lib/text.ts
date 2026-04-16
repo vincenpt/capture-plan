@@ -121,8 +121,9 @@ export function mergeTags(existing: string[], newTagsCsv: string): string {
   return filterNoiseTags(merged.join(","))
 }
 
-/** Extract the project directory name from a cwd path (e.g. "/foo/bar" -> "bar"). */
-export function getProjectName(cwd?: string): string {
+/** Extract the project directory name from a cwd path (e.g. "/foo/bar" -> "bar"). When a config override is provided, it takes precedence over the directory name. */
+export function getProjectName(cwd?: string, configProjectName?: string): string {
+  if (configProjectName) return configProjectName
   if (!cwd) return ""
   return basename(cwd)
 }

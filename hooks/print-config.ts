@@ -36,6 +36,7 @@ interface KeyDef {
 
 const KEYS: KeyDef[] = [
   { key: "vault", field: "vault", defaultValue: null },
+  { key: "project_name", field: "project_name", defaultValue: null },
   {
     key: "plan.path",
     table: "plan",
