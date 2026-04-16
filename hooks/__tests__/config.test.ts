@@ -1,7 +1,13 @@
 import { describe, expect, it } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
-import { findTranscriptPath, getUserConfigDir, userGlobalConfigPath } from "../lib/config.ts"
+import {
+  findTranscriptPath,
+  getUserConfigDir,
+  loadConfig,
+  userGlobalConfigPath,
+} from "../lib/config.ts"
 
 describe("getUserConfigDir", () => {
   it("returns LOCALAPPDATA path on win32 when LOCALAPPDATA is set", () => {
@@ -64,6 +70,45 @@ describe("findTranscriptPath", () => {
     const cwd = "C:\\Users/testuser\\projects/my-project"
     const slug = `-${cwd.replace(/[/\\]/g, "-").replace(/:/g, "")}`
     expect(slug).toBe("-C-Users-testuser-projects-my-project")
+  })
+})
+
+describe("loadConfig project_name", () => {
+  function writeProjectToml(contents: string): string {
+    const cwd = mkdtempSync(join(tmpdir(), "cp-project-name-"))
+    mkdirSync(join(cwd, ".claude"), { recursive: true })
+    writeFileSync(join(cwd, ".claude", "capture-plan.toml"), contents)
+    return cwd
+  }
+
+  it("resolves project_name from project-local TOML", async () => {
+    const cwd = writeProjectToml('project_name = "my-custom-project"\n')
+    try {
+      const config = await loadConfig(cwd)
+      expect(config.project_name).toBe("my-custom-project")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("trims whitespace from project_name", async () => {
+    const cwd = writeProjectToml('project_name = "  padded  "\n')
+    try {
+      const config = await loadConfig(cwd)
+      expect(config.project_name).toBe("padded")
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it("falls back to undefined when project_name is an empty string", async () => {
+    const cwd = writeProjectToml('project_name = ""\n')
+    try {
+      const config = await loadConfig(cwd)
+      expect(config.project_name).toBeUndefined()
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
   })
 })
 

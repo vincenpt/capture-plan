@@ -104,7 +104,7 @@ async function main(): Promise<void> {
     // Create session document in the vault if sessions are enabled
     if (sessionEnabled) {
       const now = new Date().toISOString()
-      const project = getProjectName(cwd)
+      const project = getProjectName(cwd, config.project_name)
 
       const sessionDocPath = createSessionDoc({
         sessionId,
