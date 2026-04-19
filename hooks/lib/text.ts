@@ -294,7 +294,10 @@ export function formatJournalCallout(
 
 /** Escape content for the Obsidian CLI append command: newlines and wikilink pipes. */
 export function escapeForObsidianAppend(content: string): string {
-  return content.replace(/\n/g, "\\n").replace(/\[\[([^\]]*?)\|([^\]]*?)\]\]/g, "[[$1\\|$2]]")
+  // Note: Bun.spawnSync passes args directly (no shell), so real newlines work.
+  // Escaping to literal \n causes Obsidian CLI to crash (exit 255) on Windows.
+  // Only escape pipe chars inside wikilinks for the append command.
+  return content.replace(/\[\[([^\]]*?)\|([^\]]*?)\]\]/g, "[[$1\\|$2]]")
 }
 
 /** Ensure a path ends with `.md`, appending the extension if missing. */

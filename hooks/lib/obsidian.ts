@@ -32,9 +32,10 @@ export function createVaultNote(
   content: string,
   vault?: string,
 ): { success: boolean; exitCode: number; stdout: string; stderr: string } {
-  const escaped = content.replace(/\n/g, "\\n")
+  // Note: Bun.spawnSync passes args directly (no shell), so real newlines work.
+  // Escaping to literal \n causes Obsidian CLI to crash (exit 255) on Windows.
   const result = runObsidian(
-    ["create", `path=${path}`, `content=${escaped}`, "overwrite", "silent"],
+    ["create", `path=${path}`, `content=${content}`, "overwrite", "silent"],
     vault,
   )
   return {

@@ -521,8 +521,8 @@ describe("formatJournalCallout", () => {
 // ---- escapeForObsidianAppend ----
 
 describe("escapeForObsidianAppend", () => {
-  it("escapes newlines", () => {
-    expect(escapeForObsidianAppend("line1\nline2")).toBe("line1\\nline2")
+  it("preserves newlines (Bun.spawnSync passes args directly)", () => {
+    expect(escapeForObsidianAppend("line1\nline2")).toBe("line1\nline2")
   })
 
   it("escapes pipes in wikilinks", () => {
@@ -532,7 +532,7 @@ describe("escapeForObsidianAppend", () => {
   it("handles both newlines and wikilinks", () => {
     const input = "> [!plan]+ Title\n> - **2:11 PM** [[path|plan]]"
     const result = escapeForObsidianAppend(input)
-    expect(result).toBe("> [!plan]+ Title\\n> - **2:11 PM** [[path\\|plan]]")
+    expect(result).toBe("> [!plan]+ Title\n> - **2:11 PM** [[path\\|plan]]")
   })
 
   it("does not escape pipes outside wikilinks", () => {

@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 // print-config.ts — Print full plugin configuration with per-option provenance
 
-import { homedir } from "node:os"
 import { join } from "node:path"
+import { getUserConfigDir } from "./lib/config.ts"
 import { PLUGIN_ROOT } from "./lib/types.ts"
 import { loadToml } from "./shared.ts"
 
@@ -68,9 +68,13 @@ const KEYS: KeyDef[] = [
 
 const cwd = process.env.CLAUDE_CWD
 
-const pluginLayer = await loadToml(join(PLUGIN_ROOT, "capture-plan.toml"))
-const userLayer = await loadToml(join(homedir(), ".config", "capture-plan", "config.toml"))
-const projectLayer = cwd ? await loadToml(join(cwd, ".claude", "capture-plan.toml")) : null
+const pluginPath = join(PLUGIN_ROOT, "capture-plan.toml")
+const userPath = join(getUserConfigDir(), "config.toml")
+const projectPath = cwd ? join(cwd, ".claude", "capture-plan.toml") : null
+
+const pluginLayer = await loadToml(pluginPath)
+const userLayer = await loadToml(userPath)
+const projectLayer = projectPath ? await loadToml(projectPath) : null
 
 const layers: Array<{ name: "plugin" | "user" | "project"; data: Layer }> = [
   { name: "plugin", data: pluginLayer },
@@ -93,4 +97,13 @@ const options: ConfigEntry[] = KEYS.map(({ key, table, field, flatKey, defaultVa
   return { key, value, source }
 })
 
-console.log(JSON.stringify({ options }))
+console.log(
+  JSON.stringify({
+    options,
+    configPaths: {
+      plugin: pluginPath,
+      user: userPath,
+      project: projectPath || null,
+    },
+  }),
+)

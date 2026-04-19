@@ -15,7 +15,9 @@ Display every capture-plan config option, its current effective value, and which
 CLAUDE_CWD="$PWD" bun ${CLAUDE_PLUGIN_ROOT}/hooks/print-config.ts
 ```
 
-Parse the JSON output. The `options` array contains objects with `key`, `value`, and `source`.
+Parse the JSON output. It contains:
+- `options` — array of objects with `key`, `value`, and `source`
+- `configPaths` — object with `plugin`, `user`, and `project` file paths (resolved for the current platform)
 
 ### 2. Display results
 
@@ -31,7 +33,17 @@ For each entry in `options`:
 
 ### 3. Show config file paths
 
-After the table, list the config file locations and whether each exists:
-- **Plugin default:** `${CLAUDE_PLUGIN_ROOT}/capture-plan.toml`
-- **User global:** `~/.config/capture-plan/config.toml`
-- **Project local:** `.claude/capture-plan.toml`
+After the table, extract and display the resolved paths from the JSON response under `configPaths`:
+
+```json
+"configPaths": {
+  "plugin": "...",
+  "user": "...",
+  "project": "..."
+}
+```
+
+Display as:
+- **Plugin default:** `configPaths.plugin`
+- **User global:** `configPaths.user` (auto-resolved for the current platform)
+- **Project local:** `configPaths.project` (or `(not set)` if outside a project)

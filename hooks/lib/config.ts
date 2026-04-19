@@ -1,7 +1,7 @@
 // config.ts — Config loading, context hints, version detection, transcript discovery
 
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
-import { homedir, tmpdir } from "node:os"
+import { homedir, platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DATE_SCHEMES, type DateScheme } from "./dates.ts"
 import { debugLog, filterNoiseTags } from "./text.ts"
@@ -58,7 +58,30 @@ export function findActiveSession(cwd: string, sessionsDir?: string): CcSession 
 }
 
 const PLUGIN_DEFAULT_CONFIG = join(PLUGIN_ROOT, "capture-plan.toml")
-const USER_GLOBAL_CONFIG = join(homedir(), ".config", "capture-plan", "config.toml")
+
+/**
+ * Returns the platform-specific user config directory for capture-plan.
+ * - Windows: `%LOCALAPPDATA%\capture-plan` (falls back to `~\AppData\Local\capture-plan`)
+ * - macOS/Linux: `~/.config/capture-plan`
+ * @param platformOverride - For testing only; if provided, uses this instead of detecting the platform
+ */
+export function getUserConfigDir(platformOverride?: string): string {
+  const home = homedir()
+  const currentPlatform = platformOverride ?? platform()
+  if (currentPlatform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA
+    if (localAppData) return join(localAppData, "capture-plan")
+    return join(home, "AppData", "Local", "capture-plan")
+  }
+  return join(home, ".config", "capture-plan")
+}
+
+/** Returns the platform-specific user-global config file path. */
+export function userGlobalConfigPath(): string {
+  return join(getUserConfigDir(), "config.toml")
+}
+
+const USER_GLOBAL_CONFIG = userGlobalConfigPath()
 
 const DEFAULT_PLAN_PATH = "Claude/Plans"
 const DEFAULT_JOURNAL_PATH = "Claude/Journal"
@@ -269,7 +292,7 @@ export function readSessionDocPath(sessionId: string): string | undefined {
   return typeof hint?.session_doc_path === "string" ? hint.session_doc_path : undefined
 }
 
-const CONFIG_DEBUG_LOG = "/tmp/capture-config-debug.log"
+const CONFIG_DEBUG_LOG = join(tmpdir(), "capture-config-debug.log")
 
 /**
  * Merge partial updates into the context hint file. Only overwrites supplied keys;
@@ -351,7 +374,8 @@ export function nextCounter(dateDirPath: string): number {
 export function findTranscriptPath(sessionId: string, cwd?: string): string | null {
   if (!cwd) return null
   const projectsDir = join(homedir(), ".claude", "projects")
-  const slug = `-${cwd.replace(/\//g, "-")}`
+  // Replace both / and \ with -, then remove any remaining : (Windows drive letter)
+  const slug = `-${cwd.replace(/[/\\]/g, "-").replace(/:/g, "")}`
   const p = join(projectsDir, slug, `${sessionId}.jsonl`)
   try {
     if (Bun.file(p).size > 0) return p
