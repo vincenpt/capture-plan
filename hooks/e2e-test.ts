@@ -685,9 +685,10 @@ async function main(): Promise<void> {
   const tempCwd = join(tmpdir(), `e2e-test-cwd-${sessionId.slice(0, 8)}`)
   mkdirSync(tempCwd, { recursive: true })
 
-  // Write synthetic transcript at the path findTranscriptPath() will discover
-  // (based on cwd slug: ~/.claude/projects/-<cwd-with-slashes-replaced>/<sessionId>.jsonl)
-  const cwdSlug = `-${tempCwd.replace(/\//g, "-")}`
+  // Write synthetic transcript at the path findTranscriptPath() will discover.
+  // Slug transform must match findTranscriptPath(): replace / and \, then drop
+  // Windows drive-letter colons so the projects subdir is a valid filename.
+  const cwdSlug = `-${tempCwd.replace(/[/\\]/g, "-").replace(/:/g, "")}`
   const projectDir = join(process.env.HOME || "", ".claude", "projects", cwdSlug)
   mkdirSync(projectDir, { recursive: true })
   const transcriptPath = join(projectDir, `${sessionId}.jsonl`)
