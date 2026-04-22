@@ -21,6 +21,7 @@ export interface SessionConfig {
 /** Plugin configuration loaded from the 3-layer TOML config cascade. */
 export interface Config {
   vault?: string
+  project_name?: string
   plan: PathConfig
   journal: PathConfig
   session: SessionConfig

@@ -178,7 +178,7 @@ async function main(): Promise<void> {
 
     const journalPath = getJournalPath(config)
 
-    const project = getProjectName(payload.cwd)
+    const project = getProjectName(payload.cwd, config.project_name)
     const tagsYaml = formatTagsYaml(newTags)
 
     const contextCap = resolveContextCap(stats?.peakTurnContext ?? 0, config.context_cap, sessionId)

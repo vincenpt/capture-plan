@@ -127,6 +127,9 @@ The plugin ships with a default config. Override settings at any of these locati
 # Obsidian vault name (run `obsidian vaults` to list available vaults)
 vault = "Personal"
 
+# Override the project name (default: directory name)
+# project_name = "my-project"
+
 # Plan notes configuration
 [plan]
 path = "Claude/Plans"

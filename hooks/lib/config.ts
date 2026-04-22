@@ -132,6 +132,10 @@ export async function loadConfig(cwd?: string): Promise<Config> {
   const projectPath = cwd ? join(cwd, ".claude", "capture-plan.toml") : null
   const project = projectPath ? await loadToml(projectPath) : null
   const merged = { ...pluginDefault, ...userGlobal, ...project }
+  const rawProjectName = merged.project_name
+  const projectName =
+    typeof rawProjectName === "string" && rawProjectName.trim() ? rawProjectName.trim() : undefined
+
   const rawCap = merged.context_cap
   const contextCap = typeof rawCap === "number" && rawCap > 0 ? rawCap : undefined
   const rawCaptureSkills = merged.capture_skills
@@ -170,6 +174,7 @@ export async function loadConfig(cwd?: string): Promise<Config> {
 
   return {
     vault: (merged.vault as string) || undefined,
+    project_name: projectName,
     plan: { path: planPath, date_scheme: planScheme },
     journal: { path: journalPath, date_scheme: journalScheme },
     session,

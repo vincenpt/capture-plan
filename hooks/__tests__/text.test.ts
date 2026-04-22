@@ -270,6 +270,18 @@ describe("getProjectName", () => {
   it("handles root path", () => {
     expect(getProjectName("/")).toBe("")
   })
+
+  it("uses config override when provided", () => {
+    expect(getProjectName("/Users/k/src/capture-plan", "custom-project")).toBe("custom-project")
+  })
+
+  it("falls back to basename when override is undefined", () => {
+    expect(getProjectName("/Users/k/src/capture-plan", undefined)).toBe("capture-plan")
+  })
+
+  it("falls back to basename when override is empty string", () => {
+    expect(getProjectName("/Users/k/src/capture-plan", "")).toBe("capture-plan")
+  })
 })
 
 describe("formatTagsYaml", () => {

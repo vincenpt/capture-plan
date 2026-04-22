@@ -324,7 +324,7 @@ export async function backportPlans(
         tags = res.tags
       }
 
-      const project = getProjectName(plan.projectCwd)
+      const project = getProjectName(plan.projectCwd, config.project_name)
       const tagsYaml = formatTagsYaml(tags)
 
       const noteContent = `---

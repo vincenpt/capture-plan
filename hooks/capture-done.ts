@@ -114,7 +114,7 @@ async function buildSuperpowersState(
   const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`
   const planPath = `${planDir}/plan`
   const journalPath = getJournalPath(config)
-  const project = getProjectName(payload.cwd)
+  const project = getProjectName(payload.cwd, config.project_name)
   const tagsYaml = formatTagsYaml(newTags)
 
   // Collect planning-phase stats
@@ -268,7 +268,7 @@ async function buildSkillState(
   const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`
   const activityPath = `${planDir}/activity`
   const journalPath = getJournalPath(config)
-  const project = getProjectName(payload.cwd)
+  const project = getProjectName(payload.cwd, config.project_name)
   const tagsYaml = formatTagsYaml(newTags)
 
   // Use first skill invocation as boundary
@@ -430,7 +430,7 @@ async function main(): Promise<void> {
     const lastMessage = payload.last_assistant_message?.trim() || undefined
 
     const mainHint = readContextHintFull(sessionId)
-    const stopProject = getProjectName(payload.cwd)
+    const stopProject = getProjectName(payload.cwd, config.project_name)
     const cachedSessionDocPath = ensureSessionRelocated({
       sessionId,
       cachedDocPath: mainHint?.session_doc_path,
@@ -711,7 +711,7 @@ async function main(): Promise<void> {
 
     const summaryPath = `${state.plan_dir}/summary`
 
-    const project = state.project || getProjectName(payload.cwd)
+    const project = state.project || getProjectName(payload.cwd, config.project_name)
     const planTags = state.tags
       ? state.tags
           .split(",")
