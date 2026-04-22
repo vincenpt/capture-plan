@@ -350,26 +350,6 @@ export function resolveContextCap(
   return DEFAULT_CONTEXT_CAP
 }
 
-/** Return the next plan counter for a date directory by scanning existing `NNN-slug` entries. */
-export function nextCounter(dateDirPath: string): number {
-  try {
-    const entries = readdirSync(dateDirPath)
-    let max = 0
-    for (const entry of entries) {
-      const match = entry.match(/^(\d{3,})-/)
-      if (match) {
-        const num = parseInt(match[1], 10)
-        if (num > max) max = num
-      }
-    }
-    return max + 1
-  } catch (err: unknown) {
-    if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT")
-      return 1
-    throw err
-  }
-}
-
 /** Locate the JSONL transcript file for a session using the cwd-derived project slug. */
 export function findTranscriptPath(sessionId: string, cwd?: string): string | null {
   if (!cwd) return null

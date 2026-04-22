@@ -675,8 +675,7 @@ async function main(): Promise<void> {
   const dateParts = getDateParts()
   const { datetime } = dateParts
   const dateDirRelative = getPlanDatePath(config, dateParts)
-  const dateDirAbsolute = join(vaultPath, dateDirRelative)
-  const counter = nextCounter(dateDirAbsolute)
+  const counter = nextCounter(dateDirRelative, config.vault)
   const slug = toSlug(PLAN_TITLE)
   const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`
   const planDirAbsolute = join(vaultPath, planDir)

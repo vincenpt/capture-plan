@@ -3,7 +3,7 @@
 // Captures the "Done" summary after plan execution completes
 
 import { readFileSync } from "node:fs"
-import { basename, join } from "node:path"
+import { basename } from "node:path"
 import { DONE_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT, SKILL_SYSTEM_PROMPT } from "./lib/prompts.ts"
 import { IS_DEV_MODE } from "./lib/types.ts"
 import {
@@ -106,9 +106,7 @@ async function buildSuperpowersState(
   const { dateKey, datetime, ampmTime } = dateParts
   const dateDirRelative = getPlanDatePath(config, dateParts)
 
-  const vaultPath = getVaultPath(config.vault)
-  const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null
-  const counter = dateDirAbsolute ? nextCounter(dateDirAbsolute) : 1
+  const counter = nextCounter(dateDirRelative, config.vault)
 
   const { summary, tags: newTags } = await summarizeWithClaude(planContent, PLAN_SYSTEM_PROMPT)
   const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`
@@ -261,9 +259,7 @@ async function buildSkillState(
   const { dateKey, datetime, ampmTime } = dateParts
   const dateDirRelative = getPlanDatePath(config, dateParts)
 
-  const vaultPath = getVaultPath(config.vault)
-  const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null
-  const counter = dateDirAbsolute ? nextCounter(dateDirAbsolute) : 1
+  const counter = nextCounter(dateDirRelative, config.vault)
 
   const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`
   const activityPath = `${planDir}/activity`
