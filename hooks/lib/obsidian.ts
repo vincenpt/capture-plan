@@ -2,6 +2,7 @@
 
 import { join } from "node:path"
 import { type DateParts, formatDatePath, getDatePartsFor } from "./dates.ts"
+import { PLAN_DIR_PATTERN } from "./path-style.ts"
 import { appendRevisionToCallout } from "./session-state.ts"
 import { ensureMdExt, escapeForObsidianAppend, formatJournalCallout, mergeTags } from "./text.ts"
 import type { Config } from "./types.ts"
@@ -73,6 +74,22 @@ export function listVaultFolders(folderRel: string, vault?: string): string[] {
       return line.split("/").length === depth
     })
     .map((line) => line.slice(prefix.length))
+}
+
+/** Return the next plan counter for a vault-relative date directory by
+ *  scanning existing `NNN-slug` subfolders via the Obsidian CLI.
+ *  Returns 1 when the folder doesn't exist or contains no numbered entries. */
+export function nextCounter(dateDirRel: string, vault?: string): number {
+  const entries = listVaultFolders(dateDirRel, vault)
+  let max = 0
+  for (const entry of entries) {
+    const match = entry.match(PLAN_DIR_PATTERN)
+    if (match) {
+      const num = parseInt(match[1], 10)
+      if (num > max) max = num
+    }
+  }
+  return max + 1
 }
 
 /** List immediate child file names under a vault folder (non-recursive). */

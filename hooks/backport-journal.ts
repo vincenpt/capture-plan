@@ -303,8 +303,7 @@ export async function backportPlans(
       const slug = toSlug(title)
       const dateParts = getDatePartsFor(new Date(`${plan.date}T12:00:00`))
       const dateDirRelative = getPlanDatePath(config, dateParts)
-      const dateDirAbsolute = join(vaultPath, dateDirRelative)
-      const counter = nextCounter(dateDirAbsolute)
+      const counter = nextCounter(dateDirRelative, config.vault)
 
       const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`
       const planPath = `${planDir}/plan`

@@ -4,6 +4,24 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import * as shared from "../shared.ts"
 
+// ---- Type-safe mock helper for Bun.spawnSync ----
+
+type SpawnSyncResult = ReturnType<typeof Bun.spawnSync>
+
+function spawnSyncResult(overrides: {
+  stdout?: string
+  stderr?: string
+  exitCode?: number
+  success?: boolean
+}): SpawnSyncResult {
+  return {
+    stdout: Buffer.from(overrides.stdout ?? ""),
+    stderr: Buffer.from(overrides.stderr ?? ""),
+    exitCode: overrides.exitCode ?? 0,
+    success: overrides.success ?? true,
+  } as SpawnSyncResult
+}
+
 // ---- hooks.json structural validation ----
 
 describe("hooks.json", () => {
@@ -53,37 +71,53 @@ afterEach(() => {
 // ---- nextCounter ----
 
 describe("nextCounter", () => {
-  it("returns 1 when directory does not exist", () => {
-    expect(shared.nextCounter(join(tempDir, "no-such-dir"))).toBe(1)
+  const DATE_DIR = "Claude/Plans/2026/04-22"
+  let spawnSyncSpy: ReturnType<typeof spyOn>
+
+  /** Mock Obsidian `folders` output — it emits a recursive tree of paths prefixed with the queried folder. */
+  function mockFolders(childNames: string[]): void {
+    const stdout = childNames.map((name) => `${DATE_DIR}/${name}`).join("\n")
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(spawnSyncResult({ stdout }))
+  }
+
+  afterEach(() => {
+    spawnSyncSpy?.mockRestore()
   })
 
-  it("returns 1 when directory is empty", () => {
-    const dateDir = join(tempDir, "empty-date")
-    mkdirSync(dateDir, { recursive: true })
-    expect(shared.nextCounter(dateDir)).toBe(1)
+  it("returns 1 when the folder is missing (CLI error)", () => {
+    spawnSyncSpy = spyOn(Bun, "spawnSync").mockReturnValue(
+      spawnSyncResult({ stdout: 'Error: Folder "…" not found.' }),
+    )
+    expect(shared.nextCounter(DATE_DIR)).toBe(1)
+  })
+
+  it("returns 1 when the folder is empty", () => {
+    mockFolders([])
+    expect(shared.nextCounter(DATE_DIR)).toBe(1)
   })
 
   it("returns max + 1 when folders exist", () => {
-    const dateDir = join(tempDir, "with-plans")
-    mkdirSync(join(dateDir, "001-first-plan"), { recursive: true })
-    mkdirSync(join(dateDir, "002-second-plan"), { recursive: true })
-    expect(shared.nextCounter(dateDir)).toBe(3)
+    mockFolders(["001-first-plan", "002-second-plan"])
+    expect(shared.nextCounter(DATE_DIR)).toBe(3)
   })
 
   it("finds the maximum counter, not just the last entry", () => {
-    const dateDir = join(tempDir, "unordered")
-    mkdirSync(join(dateDir, "003-third"), { recursive: true })
-    mkdirSync(join(dateDir, "001-first"), { recursive: true })
-    mkdirSync(join(dateDir, "005-fifth"), { recursive: true })
-    expect(shared.nextCounter(dateDir)).toBe(6)
+    mockFolders(["003-third", "001-first", "005-fifth"])
+    expect(shared.nextCounter(DATE_DIR)).toBe(6)
   })
 
   it("ignores entries that don't match NNN- pattern", () => {
-    const dateDir = join(tempDir, "mixed")
-    mkdirSync(join(dateDir, "001-valid-plan"), { recursive: true })
-    mkdirSync(join(dateDir, "notes"), { recursive: true })
-    mkdirSync(join(dateDir, ".hidden"), { recursive: true })
-    expect(shared.nextCounter(dateDir)).toBe(2)
+    mockFolders(["001-valid-plan", "notes", ".hidden"])
+    expect(shared.nextCounter(DATE_DIR)).toBe(2)
+  })
+
+  it("passes the vault argument through to the CLI", () => {
+    mockFolders([])
+    shared.nextCounter(DATE_DIR, "MyVault")
+    expect(spawnSyncSpy).toHaveBeenCalledWith(
+      ["obsidian", "vault=MyVault", "folders", `folder=${DATE_DIR}`],
+      { stdout: "pipe", stderr: "pipe" },
+    )
   })
 })
 

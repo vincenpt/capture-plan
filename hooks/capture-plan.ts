@@ -2,7 +2,6 @@
 // capture-plan.ts — Claude Code Hook for ExitPlanMode
 // Captures plans and persists them to Obsidian vault
 
-import { join } from "node:path"
 import { PLAN_SYSTEM_PROMPT } from "./lib/prompts.ts"
 import {
   appendEvent,
@@ -169,8 +168,7 @@ async function main(): Promise<void> {
     }
 
     const vaultPath = getVaultPath(config.vault)
-    const dateDirAbsolute = vaultPath ? join(vaultPath, dateDirRelative) : null
-    const counter = dateDirAbsolute ? nextCounter(dateDirAbsolute) : 1
+    const counter = nextCounter(dateDirRelative, config.vault)
     const { summary, tags: newTags } = await summarizeWithClaude(planContent, PLAN_SYSTEM_PROMPT)
 
     const planDir = `${dateDirRelative}/${padCounter(counter)}-${slug}`
